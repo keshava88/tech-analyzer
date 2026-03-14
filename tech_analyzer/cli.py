@@ -5,6 +5,8 @@ Examples:
     python -m tech_analyzer RELIANCE.NS
     python -m tech_analyzer TCS.NS --period 3mo --interval 1d
     python -m tech_analyzer INFY.NS --latest
+    python -m tech_analyzer RELIANCE.NS --chart
+    python -m tech_analyzer RELIANCE.NS --latest --chart --window 7
 """
 import argparse
 import sys
@@ -33,6 +35,24 @@ def main():
         metavar="PATTERN",
         help="Specific patterns to detect (default: all)",
     )
+    parser.add_argument(
+        "--chart",
+        action="store_true",
+        help="Generate a candlestick chart PNG for each detected pattern",
+    )
+    parser.add_argument(
+        "--window",
+        type=int,
+        default=5,
+        metavar="N",
+        help="Candles before and after the pattern to include in chart (default: 5)",
+    )
+    parser.add_argument(
+        "--chart-dir",
+        default="charts",
+        metavar="DIR",
+        help="Directory to save chart PNGs (default: ./charts)",
+    )
     args = parser.parse_args()
 
     print(f"\nFetching {args.symbol} | period={args.period} interval={args.interval} ...")
@@ -55,6 +75,12 @@ def main():
     print(f"Patterns detected ({label}):\n")
     print(signals.to_string(index=False))
     print()
+
+    if args.chart:
+        from tech_analyzer.charts.plotter import plot_all_signals
+        print(f"\nGenerating charts (window=±{args.window} candles) → {args.chart_dir}/")
+        plot_all_signals(df, signals, window=args.window, save_dir=args.chart_dir)
+        print(f"\nDone. {len(signals)} chart(s) saved to ./{args.chart_dir}/")
 
 
 if __name__ == "__main__":

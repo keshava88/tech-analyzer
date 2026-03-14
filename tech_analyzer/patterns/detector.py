@@ -34,6 +34,30 @@ PATTERNS: dict[str, str] = {
     "CDL3OUTSIDE":         "Three Outside Up/Down",
 }
 
+# Patterns where candle colour affects signal strength
+# bullish pattern: green body = strong, red body = weak
+# bearish pattern: red body = strong, green body = weak
+COLOUR_SENSITIVE = {
+    "Hammer", "Inverted Hammer", "Hanging Man", "Shooting Star",
+    "Engulfing", "Marubozu", "Piercing Line", "Dark Cloud Cover",
+    "Morning Star", "Evening Star", "Morning Doji Star", "Evening Doji Star",
+    "Three White Soldiers", "Three Black Crows",
+}
+
+
+def _candle_colour(row: pd.Series) -> str:
+    return "green" if row["close"] >= row["open"] else "red"
+
+
+def _strength(signal: str, colour: str, pattern: str) -> str:
+    """Return 'strong' or 'weak' based on signal direction vs candle colour."""
+    if pattern not in COLOUR_SENSITIVE:
+        return "-"
+    if signal == "bullish":
+        return "strong" if colour == "green" else "weak"
+    else:
+        return "strong" if colour == "red" else "weak"
+
 
 def detect(df: pd.DataFrame, patterns: list[str] | None = None) -> pd.DataFrame:
     """
@@ -45,7 +69,7 @@ def detect(df: pd.DataFrame, patterns: list[str] | None = None) -> pd.DataFrame:
                   Defaults to all patterns in PATTERNS.
 
     Returns:
-        DataFrame with columns: date, pattern, signal (bullish/bearish/neutral), value
+        DataFrame with columns: date, pattern, signal, value, candle, strength
         Only rows where a pattern fired (value != 0) are returned.
     """
     targets = patterns if patterns is not None else list(PATTERNS.keys())
@@ -70,15 +94,20 @@ def detect(df: pd.DataFrame, patterns: list[str] | None = None) -> pd.DataFrame:
         for date, val in fired.items():
             val = int(val)
             signal = "bullish" if val > 0 else "bearish"
+            pat_name = PATTERNS[key]
+            colour = _candle_colour(df.loc[date])
+            strength = _strength(signal, colour, pat_name)
             results.append({
-                "date": date,
-                "pattern": PATTERNS[key],
-                "signal": signal,
-                "value": val,
+                "date":     date,
+                "pattern":  pat_name,
+                "signal":   signal,
+                "value":    val,
+                "candle":   colour,
+                "strength": strength,
             })
 
     if not results:
-        return pd.DataFrame(columns=["date", "pattern", "signal", "value"])
+        return pd.DataFrame(columns=["date", "pattern", "signal", "value", "candle", "strength"])
 
     return pd.DataFrame(results).sort_values("date").reset_index(drop=True)
 
