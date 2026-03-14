@@ -49,7 +49,7 @@ tech-analyzer/
 
 ---
 
-## What's Built (v0.1)
+## What's Built (v0.2)
 
 ### `data/historical.py`
 - `fetch(symbol, period, interval)` — downloads OHLCV from yfinance
@@ -58,28 +58,39 @@ tech-analyzer/
 
 ### `patterns/detector.py`
 - 22 curated patterns across single / two / three candle formations
-- `detect(df)` → all signals across full history
-- `detect_latest(df)` → signals on the most recent candle only
-- Output columns: `date`, `pattern`, `signal`, `value`, `candle`, `strength`
+- `classify_trend(close)` — EMA20/EMA50 crossover labels each candle as `uptrend` / `downtrend` / `sideways`
+- `detect(df, trend_filter)` → all signals across full history
+- `detect_latest(df, trend_filter)` → signals on the most recent candle only
+- Output columns: `date`, `pattern`, `signal`, `value`, `candle`, `strength`, `trend`, `aligned`, `if_flat`, `if_flat_ls`, `if_long`
   - `candle` — `green` or `red` (close >= open)
-  - `strength` — `strong` / `weak` / `-` based on whether candle colour aligns with signal direction
-  - e.g. a red-bodied Hammer is `bullish` but `weak`; a green-bodied Hammer is `strong`
+  - `strength` — `strong` / `weak` / `-` based on candle colour vs signal direction
+  - `trend` — `uptrend` / `downtrend` / `sideways` at the time of the signal
+  - `aligned` — `True` if pattern makes sense given the prevailing trend
+  - `if_flat` — action for long-only trader with no position: `BUY` / `WAIT` / `HOLD`
+  - `if_flat_ls` — action for long-short trader with no position: `BUY` / `SELL` / `HOLD`
+  - `if_long` — action for trader holding a long position: `BUY MORE` / `SELL` / `HOLD`
 
 ### `charts/plotter.py`
 - `plot_signal(df, signal, window, save_dir)` — generates a single PNG
-- Shows ±window candles around the pattern candle
+- Shows ±window candles around the pattern candle (default: 10)
+- EMA20 (blue) and EMA50 (orange) overlaid with legend
 - Green ▲ below candle for bullish, red ▼ above for bearish
-- Subtitle shows candle colour + strength (e.g. `Candle: RED | Strength: WEAK`)
+- Subtitle shows candle colour, strength and trend
+- Three colour-coded action badges at the bottom: No Position (L/O), No Position (L/S), Holding Long
 - `plot_all_signals(df, signals, ...)` — batch generates all charts
 
 ### `cli.py`
 ```bash
-python -m tech_analyzer RELIANCE.NS                          # all patterns, 6mo history
-python -m tech_analyzer TCS.NS --period 3mo --interval 1d   # custom period
-python -m tech_analyzer INFY.NS --latest                     # latest candle only
-python -m tech_analyzer RELIANCE.NS --chart --window 5       # generate charts
+python -m tech_analyzer RELIANCE.NS                                    # all patterns, 6mo history
+python -m tech_analyzer TCS.NS --period 3mo --interval 1d              # custom period
+python -m tech_analyzer INFY.NS --latest                               # latest candle only
+python -m tech_analyzer RELIANCE.NS --chart                            # generate charts (window=10)
+python -m tech_analyzer RELIANCE.NS --trend-filter                     # only trend-aligned signals
+python -m tech_analyzer RELIANCE.NS --trend-filter --chart --window 7  # filtered + charts
 python -m tech_analyzer RELIANCE.NS --patterns CDLHAMMER CDLENGULFING  # specific patterns
 ```
+
+Chart output goes to `output/charts/<SYMBOL>_<YYYY-MM-DD_HH-MM-SS-ffffff>_<uuid6>/` (gitignored).
 
 ---
 
@@ -108,11 +119,10 @@ pip install -e ".[dev]" --pre    # --pre needed for mplfinance (pre-release on P
 
 ## Planned Next Steps (Priority Order)
 
-### 1. Trend Context Filter *(high impact)*
-Patterns without trend context generate a lot of noise.
-- Add EMA/SMA trend classifier to `detector.py`
-- Only surface patterns that align with the prevailing trend
-- e.g. Hammer is only meaningful signal at the bottom of a downtrend
+### ~~1. Trend Context Filter~~ ✅ Done
+- EMA20/EMA50 crossover classifier added to `detector.py`
+- `--trend-filter` flag filters to aligned signals only
+- Trade action calls (if_flat, if_flat_ls, if_long) added to output and charts
 
 ### 2. Multi-Stock Screener
 - Accept a watchlist (Nifty 50, custom list) instead of a single symbol
