@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "tech-analyzer"
@@ -11,9 +11,9 @@ dependencies = [
     "pandas>=2.0",
     "numpy>=1.26",
     "yfinance>=0.2",
-    "pandas-ta>=0.3",
+    "ta-lib>=0.5",
     "upstox-python-sdk>=2.0",
-    "mplfinance>=0.12",
+    "mplfinance>=0.12.0a0",
     "python-dotenv>=1.0",
 ]
 

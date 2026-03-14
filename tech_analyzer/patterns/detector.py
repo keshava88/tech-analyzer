@@ -1,38 +1,37 @@
-"""Detect candlestick patterns using pandas-ta."""
+"""Detect candlestick patterns using TA-Lib."""
+import talib
 import pandas as pd
-import pandas_ta as ta
 
-# Curated set of high-signal patterns relevant for Indian equity markets.
-# Values indicate signal direction: +1 = bullish, -1 = bearish, 0 = neutral/context-dependent
-PATTERNS = {
+# Curated set of high-signal patterns for Indian equity markets.
+# Maps TA-Lib function name → human-readable label
+PATTERNS: dict[str, str] = {
     # Single candle
-    "doji":           0,
-    "dragonflydoji":  1,
-    "gravestonedoji": -1,
-    "hammer":         1,
-    "hangingman":     -1,
-    "invertedhammer": 1,
-    "shootingstar":   -1,
-    "marubozu":       0,   # direction depends on colour
-    "spinningtop":    0,
+    "CDLDOJI":           "Doji",
+    "CDLDRAGONFLYDOJI":  "Dragonfly Doji",
+    "CDLGRAVESTONEDOJI": "Gravestone Doji",
+    "CDLHAMMER":         "Hammer",
+    "CDLHANGINGMAN":     "Hanging Man",
+    "CDLINVERTEDHAMMER": "Inverted Hammer",
+    "CDLSHOOTINGSTAR":   "Shooting Star",
+    "CDLMARUBOZU":       "Marubozu",
+    "CDLSPINNINGTOP":    "Spinning Top",
 
     # Two candle
-    "engulfing":      0,   # CDL returns +100 (bull) or -100 (bear)
-    "harami":         0,
-    "haramicross":    0,
-    "inside":         0,
-    "piercing":       1,
-    "darkcloudcover": -1,
+    "CDLENGULFING":      "Engulfing",
+    "CDLHARAMI":         "Harami",
+    "CDLHARAMICROSS":    "Harami Cross",
+    "CDLPIERCING":       "Piercing Line",
+    "CDLDARKCLOUDCOVER": "Dark Cloud Cover",
 
     # Three candle
-    "morningstar":        1,
-    "eveningstar":        -1,
-    "morningdojistar":    1,
-    "eveningdojistar":    -1,
-    "3whitesoldiers":     1,
-    "3blackcrows":        -1,
-    "3inside":            0,
-    "3outside":           0,
+    "CDLMORNINGSTAR":      "Morning Star",
+    "CDLEVENINGSTAR":      "Evening Star",
+    "CDLMORNINGDOJISTAR":  "Morning Doji Star",
+    "CDLEVENINGDOJISTAR":  "Evening Doji Star",
+    "CDL3WHITESOLDIERS":   "Three White Soldiers",
+    "CDL3BLACKCROWS":      "Three Black Crows",
+    "CDL3INSIDE":          "Three Inside Up/Down",
+    "CDL3OUTSIDE":         "Three Outside Up/Down",
 }
 
 
@@ -41,50 +40,51 @@ def detect(df: pd.DataFrame, patterns: list[str] | None = None) -> pd.DataFrame:
     Run candlestick pattern detection on OHLCV data.
 
     Args:
-        df:       DataFrame with lowercase columns: open, high, low, close, volume
-        patterns: List of pattern names to detect. Defaults to all patterns in PATTERNS.
+        df:       DataFrame with lowercase columns: open, high, low, close
+        patterns: List of TA-Lib pattern keys to detect (e.g. 'CDLHAMMER').
+                  Defaults to all patterns in PATTERNS.
 
     Returns:
-        DataFrame of detected signals with columns:
-            date, pattern, signal (bullish/bearish/neutral), value
+        DataFrame with columns: date, pattern, signal (bullish/bearish/neutral), value
         Only rows where a pattern fired (value != 0) are returned.
     """
     targets = patterns if patterns is not None else list(PATTERNS.keys())
+
+    open_ = df["open"].astype(float)
+    high  = df["high"].astype(float)
+    low   = df["low"].astype(float)
+    close = df["close"].astype(float)
+
     results = []
+    for key in targets:
+        if key not in PATTERNS:
+            raise ValueError(f"Unknown pattern '{key}'. Available: {list(PATTERNS.keys())}")
 
-    for name in targets:
-        if name not in PATTERNS:
-            raise ValueError(f"Unknown pattern '{name}'. Available: {list(PATTERNS.keys())}")
-
-        try:
-            result = df.ta.cdl_pattern(name=name)
-        except Exception:
-            continue  # skip patterns unsupported by current pandas-ta version
-
-        if result is None or result.empty:
+        fn = getattr(talib, key, None)
+        if fn is None:
             continue
 
-        # pandas-ta returns a DataFrame with one column named e.g. 'CDL_DOJI_10_0.1'
-        col = result.columns[0]
-        fired = result[result[col] != 0]
+        result = fn(open_, high, low, close)
+        fired = result[result != 0]
 
-        for date, row in fired.iterrows():
-            val = int(row[col])
-            signal = "bullish" if val > 0 else "bearish" if val < 0 else "neutral"
-            results.append({"date": date, "pattern": name, "signal": signal, "value": val})
+        for date, val in fired.items():
+            val = int(val)
+            signal = "bullish" if val > 0 else "bearish"
+            results.append({
+                "date": date,
+                "pattern": PATTERNS[key],
+                "signal": signal,
+                "value": val,
+            })
 
     if not results:
         return pd.DataFrame(columns=["date", "pattern", "signal", "value"])
 
-    out = pd.DataFrame(results).sort_values("date").reset_index(drop=True)
-    return out
+    return pd.DataFrame(results).sort_values("date").reset_index(drop=True)
 
 
 def detect_latest(df: pd.DataFrame, patterns: list[str] | None = None) -> pd.DataFrame:
-    """
-    Return only patterns detected on the most recent candle.
-    Useful for live screening.
-    """
+    """Return only patterns detected on the most recent candle."""
     all_signals = detect(df, patterns)
     if all_signals.empty:
         return all_signals
