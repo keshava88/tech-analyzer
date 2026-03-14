@@ -11,8 +11,10 @@ dependencies = [
     "pandas>=2.0",
     "numpy>=1.26",
     "yfinance>=0.2",
-    "ta>=0.11",
-    "matplotlib>=3.8",
+    "pandas-ta>=0.3",
+    "upstox-python-sdk>=2.0",
+    "mplfinance>=0.12",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
