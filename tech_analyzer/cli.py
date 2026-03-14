@@ -49,7 +49,7 @@ def main():
     )
     parser.add_argument(
         "--chart-dir",
-        default="charts",
+        default="output/charts",
         metavar="DIR",
         help="Directory to save chart PNGs (default: ./charts)",
     )

@@ -11,7 +11,7 @@ def plot_signal(
     df: pd.DataFrame,
     signal: dict,
     window: int = 5,
-    save_dir: str = "charts",
+    save_dir: str = "output/charts",
 ) -> str:
     """
     Plot a candlestick chart for a single detected pattern signal.
@@ -121,7 +121,7 @@ def plot_all_signals(
     df: pd.DataFrame,
     signals: pd.DataFrame,
     window: int = 5,
-    save_dir: str = "charts",
+    save_dir: str = "output/charts",
 ) -> list[str]:
     """Generate charts for all signals. Returns list of saved file paths."""
     if signals.empty:

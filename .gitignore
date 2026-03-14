@@ -8,3 +8,6 @@ build/
 *.csv
 *.parquet
 .idea/
+
+# Generated output — not committed
+output/
