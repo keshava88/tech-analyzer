@@ -10,6 +10,8 @@ Examples:
 """
 import argparse
 import sys
+from datetime import datetime
+import uuid
 
 from tech_analyzer.data.historical import fetch
 from tech_analyzer.patterns.detector import detect, detect_latest
@@ -66,6 +68,11 @@ def main():
         ),
     )
     parser.add_argument(
+        "--trend-filter",
+        action="store_true",
+        help="Only show patterns aligned with the prevailing EMA20/EMA50 trend",
+    )
+    parser.add_argument(
         "--chart",
         action="store_true",
         help="Generate a candlestick chart PNG for each detected pattern",
@@ -73,17 +80,20 @@ def main():
     parser.add_argument(
         "--window",
         type=int,
-        default=5,
+        default=10,
         metavar="N",
-        help="Candles before and after the pattern to include in chart (default: 5)",
+        help="Candles before and after the pattern to include in chart (default: 10)",
     )
     parser.add_argument(
         "--chart-dir",
-        default="output/charts",
+        default=None,
         metavar="DIR",
-        help="Directory to save chart PNGs (default: ./charts)",
+        help="Directory to save chart PNGs (default: output/charts/YYYY-MM-DD)",
     )
     args = parser.parse_args()
+    if args.chart_dir is None:
+        uid = uuid.uuid4().hex[:6]
+        args.chart_dir = f"output/charts/{args.symbol}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')}_{uid}"
 
     print(f"\nFetching {args.symbol} | period={args.period} interval={args.interval} ...")
     try:
@@ -92,10 +102,10 @@ def main():
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Loaded {len(df)} candles ({df.index[0].date()} → {df.index[-1].date()})\n")
+    print(f"Loaded {len(df)} candles ({df.index[0].date()} to {df.index[-1].date()})\n")
 
     fn = detect_latest if args.latest else detect
-    signals = fn(df, patterns=args.patterns)
+    signals = fn(df, patterns=args.patterns, trend_filter=args.trend_filter)
 
     if signals.empty:
         print("No patterns detected.")
@@ -108,7 +118,7 @@ def main():
 
     if args.chart:
         from tech_analyzer.charts.plotter import plot_all_signals
-        print(f"\nGenerating charts (window=±{args.window} candles) → {args.chart_dir}/")
+        print(f"\nGenerating charts (window=+-{args.window} candles) -> {args.chart_dir}/")
         plot_all_signals(df, signals, window=args.window, save_dir=args.chart_dir)
         print(f"\nDone. {len(signals)} chart(s) saved to ./{args.chart_dir}/")
 

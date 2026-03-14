@@ -35,6 +35,7 @@ def plot_signal(
     pat_signal = signal["signal"]
     candle     = signal.get("candle", "-")
     strength   = signal.get("strength", "-")
+    trend      = signal.get("trend", "")
 
     # Locate the pattern candle in the DataFrame
     try:
@@ -45,6 +46,11 @@ def plot_signal(
     start = max(0, idx - window)
     end   = min(len(df), idx + window + 1)
     slice_df = df.iloc[start:end].copy()
+
+    # Compute EMAs on full df so values are accurate at the window edges
+    close_full = df["close"].astype(float)
+    ema20 = close_full.ewm(span=20, adjust=False).mean().iloc[start:end]
+    ema50 = close_full.ewm(span=50, adjust=False).mean().iloc[start:end]
 
     # mplfinance requires capitalised column names
     slice_df = slice_df.rename(columns={
@@ -65,24 +71,30 @@ def plot_signal(
         marker_color = "#cc0000"
         marker_shape = "v"
 
-    addplot = mpf.make_addplot(
-        marker_prices,
-        type="scatter",
-        markersize=120,
-        marker=marker_shape,
-        color=marker_color,
-    )
+    addplots = [
+        mpf.make_addplot(marker_prices, type="scatter", markersize=120,
+                         marker=marker_shape, color=marker_color),
+        mpf.make_addplot(ema20, color="#1f77b4", width=1.2, label="EMA 20"),
+        mpf.make_addplot(ema50, color="#ff7f0e", width=1.2, label="EMA 50"),
+    ]
 
-    # Title line 1: pattern + signal + date
+    # Title: pattern + signal + date
     date_str = pd.Timestamp(pat_date).strftime("%Y-%m-%d")
-    title = f"{pat_name}  ·  {pat_signal.upper()}  ·  {date_str}"
+    title = f"{pat_name}  |  {pat_signal.upper()}  |  {date_str}"
 
-    # Annotation text: candle colour + strength indicator
+    # Subtitle: candle colour, strength, trend
     candle_colour_hex = "#00b300" if candle == "green" else "#cc0000"
-    if strength == "-":
-        annotation = f"Candle: {candle.upper()}"
-    else:
-        annotation = f"Candle: {candle.upper()}  |  Strength: {strength.upper()}"
+    parts = [f"Candle: {candle.upper()}"]
+    if strength != "-":
+        parts.append(f"Strength: {strength.upper()}")
+    if trend:
+        parts.append(f"Trend: {trend.upper()}")
+    annotation = "  |  ".join(parts)
+
+    # Action calls
+    if_flat    = signal.get("if_flat", "")
+    if_flat_ls = signal.get("if_flat_ls", "")
+    if_long    = signal.get("if_long", "")
 
     # File path
     Path(save_dir).mkdir(parents=True, exist_ok=True)
@@ -94,22 +106,51 @@ def plot_signal(
         type="candle",
         style="yahoo",
         title=title,
-        ylabel="Price (₹)",
+        ylabel="Price (INR)",
         volume=True,
-        addplot=[addplot],
+        addplot=addplots,
         returnfig=True,
     )
 
-    # Add candle colour + strength annotation below the title
+    # EMA legend — use handles registered by make_addplot label= param
+    price_ax = axes[0]
+    handles, labels = price_ax.get_legend_handles_labels()
+    if handles:
+        price_ax.legend(handles, labels, loc="upper left", fontsize=8, framealpha=0.7)
+
+    # Subtitle annotation: candle / strength / trend
     fig.text(
         0.5, 0.91,
         annotation,
-        ha="center",
-        va="top",
-        fontsize=9,
-        color=candle_colour_hex,
-        fontstyle="italic",
+        ha="center", va="top",
+        fontsize=9, color=candle_colour_hex, fontstyle="italic",
     )
+
+    # Action boxes: three labelled badges at the bottom of the figure
+    if if_flat:
+        def _action_colors(call: str) -> tuple[str, str]:
+            """Return (text_color, box_color) for a trade call."""
+            if call == "BUY" or call == "BUY MORE":
+                return "#ffffff", "#007a00"
+            if call == "SELL":
+                return "#ffffff", "#cc0000"
+            return "#333333", "#dddddd"   # WAIT / HOLD
+
+        actions = [
+            ("No Position\n(Long Only)", if_flat),
+            ("No Position\n(Long/Short)", if_flat_ls),
+            ("Holding\nLong", if_long),
+        ]
+        box_y = 0.04
+        xs = [0.22, 0.50, 0.78]
+        for x, (label, call) in zip(xs, actions):
+            txt_col, bg_col = _action_colors(call)
+            fig.text(
+                x, box_y, f"{label}\n{call}",
+                ha="center", va="bottom",
+                fontsize=9, fontweight="bold", color=txt_col,
+                bbox=dict(boxstyle="round,pad=0.4", facecolor=bg_col, edgecolor="none"),
+            )
 
     fig.savefig(fname, dpi=120, bbox_inches="tight")
     plt.close(fig)
