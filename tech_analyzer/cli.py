@@ -126,6 +126,13 @@ def main():
         help="Candles ahead to measure backtest outcome (default: 10)",
     )
     parser.add_argument(
+        "--units",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Shares traded per signal for INR P&L calculation (default: 10)",
+    )
+    parser.add_argument(
         "--save-backtest",
         default=None,
         metavar="FILE",
@@ -232,7 +239,7 @@ def _run_backtest(df, signals, args) -> None:
 
     print(f"\nBacktesting {len(signals)} signal(s) | forward={args.forward} candles ...\n")
 
-    results = run(df, signals, forward=args.forward)
+    results = run(df, signals, forward=args.forward, units=args.units)
     summary = summarize(results)
 
     if summary.empty:
@@ -248,9 +255,11 @@ def _run_backtest(df, signals, args) -> None:
     t = totals(results)
     if t:
         print(f"\n{'='*62}")
-        print(f"  OVERALL  |  Signals: {t['total_signals']}  eligible: {t['eligible']}")
+        print(f"  OVERALL  |  Signals: {t['total_signals']}  Eligible: {t['eligible']}  Units: {args.units}")
         print(f"  Wins: {t['wins']}  Losses: {t['losses']}  Hit Rate: {t['hit_rate']}")
-        print(f"  Total Gain: {t['total_gain']}  Total Loss: {t['total_loss']}  Net: {t['net_return']}  Avg/signal: {t['avg_return']}")
+        print(f"  Gain:  {t['total_gain']:>8}  /  INR {t['gain_inr']:>10}")
+        print(f"  Loss:  {t['total_loss']:>8}  /  INR {t['loss_inr']:>10}")
+        print(f"  Net:   {t['net_return']:>8}  /  INR {t['net_inr']:>10}  (avg {t['avg_return']}/signal)")
         print(f"{'='*62}")
 
     if args.save_backtest:

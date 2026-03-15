@@ -16,6 +16,7 @@ def run(
     df: pd.DataFrame,
     signals: pd.DataFrame,
     forward: int = 10,
+    units: int = 10,
 ) -> pd.DataFrame:
     """
     Compute forward returns for each signal.
@@ -24,10 +25,11 @@ def run(
         df:       Full OHLCV DataFrame (lowercase columns, DatetimeIndex)
         signals:  Output of detector.detect() — all historical signals
         forward:  Number of candles ahead to measure outcome
+        units:    Number of shares traded per signal (for INR P&L)
 
     Returns:
         DataFrame with one row per signal plus columns:
-          entry_close, outcome_close, pct_change, win, candles_available
+          entry_close, outcome_close, pct_change, inr_pnl, win, candles_available
     """
     if signals.empty:
         return pd.DataFrame()
@@ -50,10 +52,12 @@ def run(
         if avail < forward:
             outcome = float("nan")
             pct = float("nan")
+            inr_pnl = float("nan")
             win = None
         else:
             outcome = close_vals[i + forward]
             pct = (outcome - entry) / entry * 100
+            inr_pnl = (outcome - entry) * units
             if sig["signal"] == "bullish":
                 win = pct > 0
             else:
@@ -61,10 +65,11 @@ def run(
 
         rows.append({
             **sig.to_dict(),
-            "entry_close":      round(entry, 2),
-            "outcome_close":    round(outcome, 2) if not pd.isna(outcome) else None,
-            "pct_change":       round(pct, 2) if not pd.isna(pct) else None,
-            "win":              win,
+            "entry_close":       round(entry, 2),
+            "outcome_close":     round(outcome, 2) if not pd.isna(outcome) else None,
+            "pct_change":        round(pct, 2) if not pd.isna(pct) else None,
+            "inr_pnl":           round(inr_pnl, 2) if not pd.isna(inr_pnl) else None,
+            "win":               win,
             "candles_available": avail,
         })
 
@@ -95,6 +100,7 @@ def summarize(results: pd.DataFrame) -> pd.DataFrame:
         wins = grp["win"].sum()
         pcts = grp["pct_change"].astype(float)
 
+        inr = grp["inr_pnl"].astype(float)
         rows.append({
             "pattern":    pattern,
             "signal":     signal,
@@ -107,6 +113,7 @@ def summarize(results: pd.DataFrame) -> pd.DataFrame:
             "avg_loss":   f"{pcts[~grp['win']].mean():+.2f}%" if (~grp["win"]).any() else "-",
             "best":       f"{pcts.max():+.2f}%",
             "worst":      f"{pcts.min():+.2f}%",
+            "net_inr":    f"{inr.sum():+.0f}",
         })
 
     out = pd.DataFrame(rows).sort_values(
@@ -133,6 +140,7 @@ def totals(results: pd.DataFrame) -> dict:
         return {}
 
     pcts = eligible["pct_change"].astype(float)
+    inr  = eligible["inr_pnl"].astype(float)
     wins = eligible["win"]
 
     return {
@@ -145,4 +153,7 @@ def totals(results: pd.DataFrame) -> dict:
         "total_loss":    f"{pcts[~wins].sum():+.2f}%",
         "net_return":    f"{pcts.sum():+.2f}%",
         "avg_return":    f"{pcts.mean():+.2f}%",
+        "gain_inr":      f"+{inr[wins].sum():,.0f}",
+        "loss_inr":      f"{inr[~wins].sum():,.0f}",
+        "net_inr":       f"{inr.sum():+,.0f}",
     }
