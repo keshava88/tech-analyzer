@@ -18,8 +18,8 @@ def _draw_sr(ax, levels: dict, price_min: float, price_max: float) -> None:
         ax.axhline(p, color="#007a00", linestyle="--", linewidth=0.8, alpha=0.65)
         ax.annotate(
             f"S {p:.1f}",
-            xy=(1.01, p), xycoords=("axes fraction", "data"),
-            fontsize=7, color="#007a00", va="center",
+            xy=(-0.01, p), xycoords=("axes fraction", "data"),
+            fontsize=7, color="#007a00", va="center", ha="right",
         )
 
     for lvl in visible["resistance"]:
@@ -27,8 +27,8 @@ def _draw_sr(ax, levels: dict, price_min: float, price_max: float) -> None:
         ax.axhline(p, color="#cc0000", linestyle="--", linewidth=0.8, alpha=0.65)
         ax.annotate(
             f"R {p:.1f}",
-            xy=(1.01, p), xycoords=("axes fraction", "data"),
-            fontsize=7, color="#cc0000", va="center",
+            xy=(-0.01, p), xycoords=("axes fraction", "data"),
+            fontsize=7, color="#cc0000", va="center", ha="right",
         )
 
 
@@ -142,7 +142,7 @@ def plot_signal(
     price_ax = axes[0]
     handles, labels = price_ax.get_legend_handles_labels()
     if handles:
-        price_ax.legend(handles, labels, loc="upper left", fontsize=8, framealpha=0.7)
+        price_ax.legend(handles, labels, loc="lower right", fontsize=8, framealpha=0.7)
 
     # S/R lines
     if show_sr:
@@ -152,39 +152,20 @@ def plot_signal(
         price_max = slice_df["High"].max()
         _draw_sr(price_ax, sr, float(price_min), float(price_max))
 
-    # Subtitle annotation: candle / strength / trend
+    # Subtitle line 1: candle / strength / trend
+    # Subtitle line 2: compact action calls (L-Only / L-Short / Holding)
+    if if_flat:
+        action_line = (
+            f"L-Only: {if_flat}  |  L/S: {if_flat_ls}  |  Holding: {if_long}"
+        )
+        annotation = annotation + "\n" + action_line
+
     fig.text(
         0.5, 0.91,
         annotation,
         ha="center", va="top",
         fontsize=9, color=candle_colour_hex, fontstyle="italic",
     )
-
-    # Action boxes: three labelled badges at the bottom of the figure
-    if if_flat:
-        def _action_colors(call: str) -> tuple[str, str]:
-            """Return (text_color, box_color) for a trade call."""
-            if call == "BUY" or call == "BUY MORE":
-                return "#ffffff", "#007a00"
-            if call == "SELL":
-                return "#ffffff", "#cc0000"
-            return "#333333", "#dddddd"   # WAIT / HOLD
-
-        actions = [
-            ("No Position\n(Long Only)", if_flat),
-            ("No Position\n(Long/Short)", if_flat_ls),
-            ("Holding\nLong", if_long),
-        ]
-        box_y = 0.04
-        xs = [0.22, 0.50, 0.78]
-        for x, (label, call) in zip(xs, actions):
-            txt_col, bg_col = _action_colors(call)
-            fig.text(
-                x, box_y, f"{label}\n{call}",
-                ha="center", va="bottom",
-                fontsize=9, fontweight="bold", color=txt_col,
-                bbox=dict(boxstyle="round,pad=0.4", facecolor=bg_col, edgecolor="none"),
-            )
 
     fig.savefig(fname, dpi=120, bbox_inches="tight")
     plt.close(fig)
