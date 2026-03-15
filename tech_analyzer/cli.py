@@ -96,6 +96,11 @@ def main():
         help="Generate a candlestick chart PNG for each detected pattern",
     )
     parser.add_argument(
+        "--sr",
+        action="store_true",
+        help="Annotate charts with support/resistance levels (requires --chart)",
+    )
+    parser.add_argument(
         "--window",
         type=int,
         default=10,
@@ -191,8 +196,9 @@ def _run_single(args) -> None:
 
     if args.chart:
         from tech_analyzer.charts.plotter import plot_all_signals
-        print(f"\nGenerating charts (window=+-{args.window} candles) -> {args.chart_dir}/")
-        plot_all_signals(df, signals, window=args.window, save_dir=args.chart_dir)
+        sr_label = " + S/R" if args.sr else ""
+        print(f"\nGenerating charts (window=+-{args.window} candles{sr_label}) -> {args.chart_dir}/")
+        plot_all_signals(df, signals, window=args.window, save_dir=args.chart_dir, show_sr=args.sr)
         print(f"\nDone. {len(signals)} chart(s) saved to ./{args.chart_dir}/")
 
 

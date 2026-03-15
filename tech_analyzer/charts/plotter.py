@@ -7,11 +7,37 @@ import mplfinance as mpf
 import matplotlib.pyplot as plt
 
 
+def _draw_sr(ax, levels: dict, price_min: float, price_max: float) -> None:
+    """Draw support/resistance lines on a mplfinance price axis."""
+    from tech_analyzer.analysis.sr_levels import levels_in_range
+
+    visible = levels_in_range(levels, price_min, price_max)
+
+    for lvl in visible["support"]:
+        p = lvl["price"]
+        ax.axhline(p, color="#007a00", linestyle="--", linewidth=0.8, alpha=0.65)
+        ax.annotate(
+            f"S {p:.1f}",
+            xy=(1.01, p), xycoords=("axes fraction", "data"),
+            fontsize=7, color="#007a00", va="center",
+        )
+
+    for lvl in visible["resistance"]:
+        p = lvl["price"]
+        ax.axhline(p, color="#cc0000", linestyle="--", linewidth=0.8, alpha=0.65)
+        ax.annotate(
+            f"R {p:.1f}",
+            xy=(1.01, p), xycoords=("axes fraction", "data"),
+            fontsize=7, color="#cc0000", va="center",
+        )
+
+
 def plot_signal(
     df: pd.DataFrame,
     signal: dict,
     window: int = 5,
     save_dir: str = "output/charts",
+    show_sr: bool = False,
 ) -> str:
     """
     Plot a candlestick chart for a single detected pattern signal.
@@ -118,6 +144,14 @@ def plot_signal(
     if handles:
         price_ax.legend(handles, labels, loc="upper left", fontsize=8, framealpha=0.7)
 
+    # S/R lines
+    if show_sr:
+        from tech_analyzer.analysis.sr_levels import find_levels
+        sr = find_levels(df)
+        price_min = slice_df["Low"].min()
+        price_max = slice_df["High"].max()
+        _draw_sr(price_ax, sr, float(price_min), float(price_max))
+
     # Subtitle annotation: candle / strength / trend
     fig.text(
         0.5, 0.91,
@@ -163,6 +197,7 @@ def plot_all_signals(
     signals: pd.DataFrame,
     window: int = 5,
     save_dir: str = "output/charts",
+    show_sr: bool = False,
 ) -> list[str]:
     """Generate charts for all signals. Returns list of saved file paths."""
     if signals.empty:
@@ -170,7 +205,7 @@ def plot_all_signals(
 
     saved = []
     for _, row in signals.iterrows():
-        path = plot_signal(df, row.to_dict(), window=window, save_dir=save_dir)
+        path = plot_signal(df, row.to_dict(), window=window, save_dir=save_dir, show_sr=show_sr)
         saved.append(path)
         print(f"  Saved: {path}")
 
