@@ -113,6 +113,24 @@ def main():
         metavar="DIR",
         help="Directory to save chart PNGs (default: output/charts/YYYY-MM-DD)",
     )
+    parser.add_argument(
+        "--backtest",
+        action="store_true",
+        help="Run backtest: measure hit rate and returns for all detected patterns",
+    )
+    parser.add_argument(
+        "--forward",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Candles ahead to measure backtest outcome (default: 10)",
+    )
+    parser.add_argument(
+        "--save-backtest",
+        default=None,
+        metavar="FILE",
+        help="Save backtest summary to a CSV file",
+    )
     args = parser.parse_args()
 
     if args.watchlist and args.symbol:
@@ -200,6 +218,36 @@ def _run_single(args) -> None:
         print(f"\nGenerating charts (window=+-{args.window} candles{sr_label}) -> {args.chart_dir}/")
         plot_all_signals(df, signals, window=args.window, save_dir=args.chart_dir, show_sr=args.sr)
         print(f"\nDone. {len(signals)} chart(s) saved to ./{args.chart_dir}/")
+
+    if args.backtest:
+        _run_backtest(df, signals, args)
+
+
+def _run_backtest(df, signals, args) -> None:
+    from tech_analyzer.analysis.backtest import run, summarize
+
+    if signals.empty:
+        print("No signals to backtest.")
+        return
+
+    print(f"\nBacktesting {len(signals)} signal(s) | forward={args.forward} candles ...\n")
+
+    results = run(df, signals, forward=args.forward)
+    summary = summarize(results)
+
+    if summary.empty:
+        print("Not enough data to compute hit rates (signals too close to end of history).")
+        return
+
+    print(summary.to_string(index=False))
+
+    excluded = results["win"].isna().sum()
+    if excluded:
+        print(f"\n  ({excluded} signal(s) excluded - fewer than {args.forward} candles remaining)")
+
+    if args.save_backtest:
+        summary.to_csv(args.save_backtest, index=False)
+        print(f"\nSummary saved to {args.save_backtest}")
 
 
 if __name__ == "__main__":
