@@ -57,10 +57,13 @@ def run(
         else:
             outcome = close_vals[i + forward]
             pct = (outcome - entry) / entry * 100
-            inr_pnl = (outcome - entry) * units
             if sig["signal"] == "bullish":
+                # Long trade: buy at entry, sell at outcome
+                inr_pnl = (outcome - entry) * units
                 win = pct > 0
             else:
+                # Short trade: sell at entry, cover at outcome
+                inr_pnl = (entry - outcome) * units
                 win = pct < 0
 
         rows.append({
@@ -143,17 +146,22 @@ def totals(results: pd.DataFrame) -> dict:
     inr  = eligible["inr_pnl"].astype(float)
     wins = eligible["win"]
 
+    # Direction-adjusted return: bullish=pct as-is, bearish=-pct
+    # so positive always means the trade made money
+    direction = eligible["signal"].map({"bullish": 1, "bearish": -1}).fillna(1)
+    eff = pcts * direction
+
     return {
         "total_signals": len(results),
         "eligible":      len(eligible),
         "wins":          int(wins.sum()),
         "losses":        int((~wins).sum()),
         "hit_rate":      f"{wins.mean() * 100:.1f}%",
-        "total_gain":    f"{pcts[wins].sum():+.2f}%",
-        "total_loss":    f"{pcts[~wins].sum():+.2f}%",
-        "net_return":    f"{pcts.sum():+.2f}%",
-        "avg_return":    f"{pcts.mean():+.2f}%",
-        "gain_inr":      f"+{inr[wins].sum():,.0f}",
-        "loss_inr":      f"{inr[~wins].sum():,.0f}",
+        "total_gain":    f"{eff[wins].sum():+.2f}%",
+        "total_loss":    f"{eff[~wins].sum():+.2f}%",
+        "net_return":    f"{eff.sum():+.2f}%",
+        "avg_return":    f"{eff.mean():+.2f}%",
+        "gain_inr":      f"{inr[wins].sum():+,.0f}",
+        "loss_inr":      f"{inr[~wins].sum():+,.0f}",
         "net_inr":       f"{inr.sum():+,.0f}",
     }

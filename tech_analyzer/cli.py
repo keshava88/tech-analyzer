@@ -133,6 +133,17 @@ def main():
         help="Shares traded per signal for INR P&L calculation (default: 10)",
     )
     parser.add_argument(
+        "--backtest-patterns",
+        nargs="+",
+        default=None,
+        metavar="PATTERN",
+        help=(
+            "Limit backtest to specific patterns (default: same as --patterns / all).\n"
+            "Uses the same TA-Lib key names as --patterns.\n"
+            "Example: --backtest-patterns CDLHAMMER CDLENGULFING CDLMORNINGSTAR"
+        ),
+    )
+    parser.add_argument(
         "--save-backtest",
         default=None,
         metavar="FILE",
@@ -237,9 +248,28 @@ def _run_backtest(df, signals, args) -> None:
         print("No signals to backtest.")
         return
 
-    print(f"\nBacktesting {len(signals)} signal(s) | forward={args.forward} candles ...\n")
+    bt_signals = signals
+    if args.backtest_patterns:
+        from tech_analyzer.patterns.detector import PATTERNS
+        # Resolve TA-Lib keys → human-readable names used in the signals DataFrame
+        names = []
+        for key in args.backtest_patterns:
+            key = key.upper()
+            if key not in PATTERNS:
+                print(f"Warning: unknown pattern '{key}', skipping.", file=sys.stderr)
+                continue
+            names.append(PATTERNS[key])
+        bt_signals = signals[signals["pattern"].isin(names)].reset_index(drop=True)
+        if bt_signals.empty:
+            print("No signals match the specified --backtest-patterns.")
+            return
 
-    results = run(df, signals, forward=args.forward, units=args.units)
+    label = f"forward={args.forward} candles | units={args.units}"
+    if args.backtest_patterns:
+        label += f" | patterns={len(bt_signals['pattern'].unique())}"
+    print(f"\nBacktesting {len(bt_signals)} signal(s) | {label} ...\n")
+
+    results = run(df, bt_signals, forward=args.forward, units=args.units)
     summary = summarize(results)
 
     if summary.empty:
