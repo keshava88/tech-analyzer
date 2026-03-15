@@ -15,6 +15,13 @@ Multi-stock screener:
     python -m tech_analyzer --watchlist nifty50
     python -m tech_analyzer --watchlist nifty_bank --trend-filter
     python -m tech_analyzer --watchlist nifty50 --source upstox --interval 15m
+
+Paper trading (simulated orders, real Upstox data):
+    python -m tech_analyzer --paper RELIANCE.NS --interval 15m
+    python -m tech_analyzer --paper --watchlist nifty_bank --interval 15m --capital 100000
+    python -m tech_analyzer --paper RELIANCE.NS TCS.NS --interval 5m --target 1.5 --stoploss 0.8
+    python -m tech_analyzer --portfolio            # view current paper portfolio
+    python -m tech_analyzer --portfolio --reset    # reset portfolio to starting capital
 """
 import argparse
 import sys
@@ -168,6 +175,56 @@ def main():
         metavar="FILE",
         help="Save backtest summary to a CSV file",
     )
+
+    # ---- Paper trading ----
+    parser.add_argument(
+        "--paper",
+        nargs="*",
+        metavar="SYMBOL",
+        help=(
+            "Run paper trading session using live Upstox data.\n"
+            "Pass symbols directly: --paper RELIANCE.NS TCS.NS\n"
+            "Or use --watchlist with --paper (no symbols needed).\n"
+            "Requires --auth first."
+        ),
+    )
+    parser.add_argument(
+        "--portfolio",
+        action="store_true",
+        help="Show current paper trading portfolio and trade log",
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Reset paper portfolio to starting capital (use with --portfolio)",
+    )
+    parser.add_argument(
+        "--capital",
+        type=float,
+        default=100_000.0,
+        metavar="INR",
+        help="Starting capital for paper trading (default: 100000)",
+    )
+    parser.add_argument(
+        "--target",
+        type=float,
+        default=2.0,
+        metavar="PCT",
+        help="Target profit %% per trade for paper trading (default: 2.0)",
+    )
+    parser.add_argument(
+        "--stoploss",
+        type=float,
+        default=1.0,
+        metavar="PCT",
+        help="Stop-loss %% per trade for paper trading (default: 1.0)",
+    )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Start a fresh paper trading session (ignore saved portfolio state)",
+    )
+
     args = parser.parse_args()
 
     if args.auth:
@@ -186,6 +243,16 @@ def main():
             args.backtest_patterns = resolve_patterns(args.backtest_patterns)
         except ValueError as e:
             parser.error(str(e))
+
+    # --portfolio: show/reset portfolio regardless of other flags
+    if args.portfolio:
+        _run_portfolio(args)
+        return
+
+    # --paper: paper trading session
+    if args.paper is not None:
+        _run_paper(args)
+        return
 
     if args.watchlist and args.symbol:
         parser.error("--watchlist and a positional symbol are mutually exclusive.")
@@ -370,6 +437,96 @@ def _run_backtest(df, signals, args) -> None:
     if args.save_backtest:
         summary.to_csv(args.save_backtest, index=False)
         print(f"\nSummary saved to {args.save_backtest}")
+
+
+def _run_portfolio(args) -> None:
+    from tech_analyzer.trading.portfolio import Portfolio, DEFAULT_PORTFOLIO_FILE
+
+    if args.reset:
+        port = Portfolio(capital=args.capital, cash=args.capital)
+        port.save(DEFAULT_PORTFOLIO_FILE)
+        print(f"Portfolio reset. Starting capital: INR {args.capital:,.0f}")
+        return
+
+    port = Portfolio.load(DEFAULT_PORTFOLIO_FILE)
+    s = port.summary()
+    print(f"\n{'='*56}")
+    print(f"  PAPER PORTFOLIO")
+    print(f"{'='*56}")
+    print(f"  Starting Capital : INR {s['capital']:>12,.0f}")
+    print(f"  Current Cash     : INR {s['cash']:>12,.0f}")
+    print(f"  Open Pos Value   : INR {s['open_value']:>12,.0f}")
+    print(f"  Total Value      : INR {s['total_value']:>12,.0f}")
+    print(f"  Total P&L        : INR {s['total_pnl']:>+12,.0f}")
+    print(f"{'='*56}")
+    print(f"  Trades: {s['trades']}  Wins: {s['wins']}  Losses: {s['losses']}  Hit Rate: {s['hit_rate']}")
+
+    if port.positions:
+        print(f"\n  Open Positions:")
+        print(f"  {'Symbol':<22} {'Pattern':<20} {'Dir':<8} {'Entry':>8} {'Target':>8} {'Stop':>8}")
+        print(f"  {'-'*76}")
+        for p in port.positions:
+            print(
+                f"  {p.symbol:<22} {p.pattern:<20} {p.signal:<8} "
+                f"{p.entry_price:>8.2f} {p.target_price:>8.2f} {p.stoploss_price:>8.2f}"
+            )
+
+    if port.closed_trades:
+        recent = port.closed_trades[-10:]
+        print(f"\n  Recent Trades (last {len(recent)}):")
+        print(f"  {'Symbol':<22} {'Pattern':<20} {'Dir':<8} {'Entry':>8} {'Exit':>8} {'PnL':>9} Reason")
+        print(f"  {'-'*88}")
+        for t in recent:
+            sign = "+" if t.pnl >= 0 else ""
+            print(
+                f"  {t.symbol:<22} {t.pattern:<20} {t.signal:<8} "
+                f"{t.entry_price:>8.2f} {t.exit_price:>8.2f} "
+                f"{sign}{t.pnl:>8.2f} {t.exit_reason}"
+            )
+
+
+def _run_paper(args) -> None:
+    from tech_analyzer.trading.session import PaperSession
+
+    # Collect symbols from --paper args or --watchlist
+    symbols = []
+    if args.paper:
+        symbols = args.paper
+    elif args.watchlist:
+        from tech_analyzer.screener.watchlists import load
+        try:
+            symbols = load(args.watchlist)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"Error loading watchlist: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print("Error: --paper requires at least one symbol or --watchlist.", file=sys.stderr)
+        sys.exit(1)
+
+    # Validate interval — paper trading only supports intraday via Upstox
+    supported = {"1m", "5m", "15m", "30m", "1h"}
+    if args.interval not in supported:
+        print(
+            f"Error: --paper requires an intraday interval. "
+            f"Supported: {', '.join(sorted(supported))}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    pattern_list = args.patterns  # already resolved by resolve_patterns above
+
+    session = PaperSession(
+        symbols=symbols,
+        interval=args.interval,
+        capital=args.capital,
+        target_pct=args.target,
+        stoploss_pct=args.stoploss,
+        fixed_units=args.units if args.units != 10 else None,  # 10 is the default sentinel
+        patterns=pattern_list,
+        trend_filter=args.trend_filter,
+        fresh=args.fresh,
+    )
+    session.run()
 
 
 if __name__ == "__main__":
