@@ -3,7 +3,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 
-from tech_analyzer.data.historical import fetch
 from tech_analyzer.patterns.detector import detect_latest
 
 
@@ -15,31 +14,41 @@ def scan(
     patterns: list[str] | None = None,
     max_workers: int = 8,
     verbose: bool = True,
+    source: str = "yfinance",
 ) -> tuple[pd.DataFrame, list[tuple[str, str]]]:
     """
     Scan a list of symbols for candlestick patterns on the latest candle.
 
     Args:
         symbols:      List of ticker symbols (e.g. ['RELIANCE.NS', 'TCS.NS'])
-        period:       History to fetch (e.g. '6mo') — needs enough bars for EMA50
-        interval:     Candle interval (e.g. '1d')
+        period:       History to fetch via yfinance (e.g. '6mo')
+        interval:     Candle interval (e.g. '1d', '15m')
         trend_filter: Only return signals aligned with the prevailing trend
         patterns:     Specific pattern keys to check (default: all)
         max_workers:  Thread pool size for parallel fetching
         verbose:      Print per-symbol progress lines
+        source:       'yfinance' (default) or 'upstox'
 
     Returns:
         (results_df, errors)
         results_df — DataFrame with a leading 'symbol' column; empty if no hits
         errors     — list of (symbol, error_message) for failed fetches
     """
+    if source == "upstox":
+        from tech_analyzer.data.live import fetch
+    else:
+        from tech_analyzer.data.historical import fetch
+
     hits: list[pd.DataFrame] = []
     errors: list[tuple[str, str]] = []
     total = len(symbols)
     done = 0
 
     def _scan_one(symbol: str) -> tuple[str, pd.DataFrame]:
-        df = fetch(symbol, period=period, interval=interval)
+        if source == "upstox":
+            df = fetch(symbol, interval=interval)
+        else:
+            df = fetch(symbol, period=period, interval=interval)
         sigs = detect_latest(df, patterns=patterns, trend_filter=trend_filter)
         return symbol, sigs
 

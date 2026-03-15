@@ -1,24 +1,26 @@
 """
 Entry point: python -m tech_analyzer <SYMBOL> [options]
 
-Single-stock analysis:
+Single-stock analysis (yfinance, default):
     python -m tech_analyzer RELIANCE.NS
     python -m tech_analyzer TCS.NS --period 3mo --interval 1d
-    python -m tech_analyzer INFY.NS --latest
-    python -m tech_analyzer RELIANCE.NS --chart
-    python -m tech_analyzer RELIANCE.NS --latest --chart --window 7
+    python -m tech_analyzer RELIANCE.NS --chart --sr
+
+Single-stock intraday analysis (Upstox):
+    python -m tech_analyzer --auth                                # one-time login
+    python -m tech_analyzer RELIANCE.NS --source upstox --interval 15m
+    python -m tech_analyzer RELIANCE.NS --source upstox --interval 1h --latest
 
 Multi-stock screener:
     python -m tech_analyzer --watchlist nifty50
     python -m tech_analyzer --watchlist nifty_bank --trend-filter
-    python -m tech_analyzer --watchlist my_stocks.txt --period 3mo
+    python -m tech_analyzer --watchlist nifty50 --source upstox --interval 15m
 """
 import argparse
 import sys
 from datetime import datetime
 import uuid
 
-from tech_analyzer.data.historical import fetch
 from tech_analyzer.patterns.detector import detect, detect_latest
 
 
@@ -42,7 +44,18 @@ def main():
             "Or pass a path to a .txt file (one ticker per line, # for comments)"
         ),
     )
-    parser.add_argument("--period", default="6mo", help="History period (default: 6mo)")
+    parser.add_argument(
+        "--auth",
+        action="store_true",
+        help="Run Upstox OAuth2 login flow and save access token (one-time setup)",
+    )
+    parser.add_argument(
+        "--source",
+        choices=["yfinance", "upstox"],
+        default="yfinance",
+        help="Data source: 'yfinance' (default) or 'upstox' (requires --auth first)",
+    )
+    parser.add_argument("--period", default="6mo", help="History period for yfinance (default: 6mo)")
     parser.add_argument("--interval", default="1d", help="Candle interval (default: 1d)")
     parser.add_argument(
         "--latest",
@@ -115,16 +128,55 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.auth:
+        _run_auth()
+        return
+
     if args.watchlist and args.symbol:
         parser.error("--watchlist and a positional symbol are mutually exclusive.")
 
     if not args.watchlist and not args.symbol:
-        parser.error("Provide a ticker symbol or use --watchlist.")
+        parser.error("Provide a ticker symbol, --watchlist, or --auth.")
 
     if args.watchlist:
         _run_screen(args)
     else:
         _run_single(args)
+
+
+def _fetch(args, symbol: str):
+    """Call the right data source based on --source flag."""
+    if args.source == "upstox":
+        from tech_analyzer.data.live import fetch as upstox_fetch
+        return upstox_fetch(symbol, interval=args.interval)
+    from tech_analyzer.data.historical import fetch as yf_fetch
+    return yf_fetch(symbol, period=args.period, interval=args.interval)
+
+
+def _run_auth() -> None:
+    import os
+    from dotenv import load_dotenv
+    from tech_analyzer.data.auth import run_oauth_flow
+
+    load_dotenv()
+    api_key     = os.getenv("UPSTOX_API_KEY")
+    api_secret  = os.getenv("UPSTOX_API_SECRET")
+    redirect_uri = os.getenv("UPSTOX_REDIRECT_URI", "http://127.0.0.1:8000/callback")
+
+    if not api_key or not api_secret:
+        print(
+            "Error: UPSTOX_API_KEY and UPSTOX_API_SECRET must be set in your .env file.\n"
+            "Copy .env.example to .env and fill in your credentials.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    try:
+        run_oauth_flow(api_key, api_secret, redirect_uri)
+        print("\nSetup complete. You can now use --source upstox.")
+    except Exception as e:
+        print(f"Auth failed: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _run_screen(args) -> None:
@@ -151,6 +203,7 @@ def _run_screen(args) -> None:
         interval=args.interval,
         trend_filter=args.trend_filter,
         patterns=args.patterns,
+        source=args.source,
     )
 
     print()
@@ -173,10 +226,13 @@ def _run_single(args) -> None:
         uid = uuid.uuid4().hex[:6]
         args.chart_dir = f"output/charts/{args.symbol}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')}_{uid}"
 
-    print(f"\nFetching {args.symbol} | period={args.period} interval={args.interval} ...")
+    src_label = f"source={args.source} interval={args.interval}"
+    if args.source == "yfinance":
+        src_label = f"period={args.period} interval={args.interval}"
+    print(f"\nFetching {args.symbol} | {src_label} ...")
     try:
-        df = fetch(args.symbol, period=args.period, interval=args.interval)
-    except ValueError as e:
+        df = _fetch(args, args.symbol)
+    except (ValueError, RuntimeError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
