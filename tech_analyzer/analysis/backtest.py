@@ -113,3 +113,36 @@ def summarize(results: pd.DataFrame) -> pd.DataFrame:
         ["signal", "hit_rate"], ascending=[True, False]
     ).reset_index(drop=True)
     return out
+
+
+def totals(results: pd.DataFrame) -> dict:
+    """
+    Compute overall summary stats across all eligible signals.
+
+    Returns a dict with:
+      total_signals, eligible, wins, losses, hit_rate,
+      total_gain (sum of winning pct_changes),
+      total_loss (sum of losing pct_changes),
+      net_return  (sum of all pct_changes),
+      avg_return
+    """
+    eligible = results[results["win"].notna()].copy()
+    eligible["win"] = eligible["win"].astype(bool)
+
+    if eligible.empty:
+        return {}
+
+    pcts = eligible["pct_change"].astype(float)
+    wins = eligible["win"]
+
+    return {
+        "total_signals": len(results),
+        "eligible":      len(eligible),
+        "wins":          int(wins.sum()),
+        "losses":        int((~wins).sum()),
+        "hit_rate":      f"{wins.mean() * 100:.1f}%",
+        "total_gain":    f"{pcts[wins].sum():+.2f}%",
+        "total_loss":    f"{pcts[~wins].sum():+.2f}%",
+        "net_return":    f"{pcts.sum():+.2f}%",
+        "avg_return":    f"{pcts.mean():+.2f}%",
+    }

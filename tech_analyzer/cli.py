@@ -224,7 +224,7 @@ def _run_single(args) -> None:
 
 
 def _run_backtest(df, signals, args) -> None:
-    from tech_analyzer.analysis.backtest import run, summarize
+    from tech_analyzer.analysis.backtest import run, summarize, totals
 
     if signals.empty:
         print("No signals to backtest.")
@@ -244,6 +244,14 @@ def _run_backtest(df, signals, args) -> None:
     excluded = results["win"].isna().sum()
     if excluded:
         print(f"\n  ({excluded} signal(s) excluded - fewer than {args.forward} candles remaining)")
+
+    t = totals(results)
+    if t:
+        print(f"\n{'='*62}")
+        print(f"  OVERALL  |  Signals: {t['total_signals']}  eligible: {t['eligible']}")
+        print(f"  Wins: {t['wins']}  Losses: {t['losses']}  Hit Rate: {t['hit_rate']}")
+        print(f"  Total Gain: {t['total_gain']}  Total Loss: {t['total_loss']}  Net: {t['net_return']}  Avg/signal: {t['avg_return']}")
+        print(f"{'='*62}")
 
     if args.save_backtest:
         summary.to_csv(args.save_backtest, index=False)
