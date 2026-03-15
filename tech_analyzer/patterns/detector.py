@@ -2,6 +2,32 @@
 import talib
 import pandas as pd
 
+# Named presets — use with --patterns or --backtest-patterns
+PRESETS: dict[str, list[str]] = {
+    "high": [
+        "CDLENGULFING",
+        "CDLMORNINGSTAR",
+        "CDLEVENINGSTAR",
+        "CDL3WHITESOLDIERS",
+        "CDL3BLACKCROWS",
+        "CDLMARUBOZU",
+    ],
+    "medium": [
+        "CDLHAMMER",
+        "CDLSHOOTINGSTAR",
+        "CDLHARAMI",
+        "CDLPIERCING",
+        "CDLDARKCLOUDCOVER",
+        "CDL3INSIDE",
+    ],
+    "indecision": [
+        "CDLDOJI",
+        "CDLSPINNINGTOP",
+        "CDLDRAGONFLYDOJI",
+        "CDLGRAVESTONEDOJI",
+    ],
+}
+
 # Curated set of high-signal patterns for Indian equity markets.
 # Maps TA-Lib function name -> human-readable label
 PATTERNS: dict[str, str] = {
@@ -59,6 +85,34 @@ CONTINUATION_PATTERNS = {
     "Three White Soldiers", "Three Black Crows", "Marubozu",
 }
 # Note: Doji and Spinning Top are pure indecision — no directional alignment defined.
+
+
+def resolve_patterns(keys: list[str]) -> list[str]:
+    """
+    Expand a list of pattern keys, resolving any preset names.
+
+    Preset names: 'high', 'medium', 'indecision'
+    These can be mixed with individual TA-Lib keys, e.g.:
+        ['high', 'CDLHAMMER']  →  [all high-preset keys] + ['CDLHAMMER']
+
+    Raises ValueError for unknown keys/presets.
+    """
+    resolved = []
+    for key in keys:
+        lower = key.lower()
+        if lower in PRESETS:
+            resolved.extend(PRESETS[lower])
+        elif key.upper() in PATTERNS:
+            resolved.append(key.upper())
+        else:
+            raise ValueError(
+                f"Unknown pattern or preset '{key}'. "
+                f"Valid presets: {list(PRESETS.keys())}. "
+                f"Valid patterns: {list(PATTERNS.keys())}."
+            )
+    # Deduplicate while preserving order
+    seen = set()
+    return [k for k in resolved if not (k in seen or seen.add(k))]
 
 
 def _candle_colour(row: pd.Series) -> str:

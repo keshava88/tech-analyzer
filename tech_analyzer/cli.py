@@ -82,6 +82,11 @@ def main():
             "    CDL3BLACKCROWS      - Three Black Crows: 3 consecutive bearish candles, strong downtrend\n"
             "    CDL3INSIDE          - Three Inside Up/Down: confirmed harami reversal\n"
             "    CDL3OUTSIDE         - Three Outside Up/Down: confirmed engulfing reversal\n\n"
+            "  PRESETS (expand to a named group)\n"
+            "    high        - Engulfing, Morning/Evening Star, 3 Soldiers/Crows, Marubozu\n"
+            "    medium      - Hammer, Shooting Star, Harami, Piercing, Dark Cloud, 3 Inside\n"
+            "    indecision  - Doji, Spinning Top, Dragonfly Doji, Gravestone Doji\n\n"
+            "  Example: --patterns high\n"
             "  Example: --patterns CDLHAMMER CDLENGULFING CDLMORNINGSTAR"
         ),
     )
@@ -139,7 +144,8 @@ def main():
         metavar="PATTERN",
         help=(
             "Limit backtest to specific patterns (default: same as --patterns / all).\n"
-            "Uses the same TA-Lib key names as --patterns.\n"
+            "Accepts TA-Lib keys or preset names: high, medium, indecision.\n"
+            "Example: --backtest-patterns high\n"
             "Example: --backtest-patterns CDLHAMMER CDLENGULFING CDLMORNINGSTAR"
         ),
     )
@@ -150,6 +156,19 @@ def main():
         help="Save backtest summary to a CSV file",
     )
     args = parser.parse_args()
+
+    # Expand preset names in --patterns and --backtest-patterns
+    from tech_analyzer.patterns.detector import resolve_patterns
+    if args.patterns:
+        try:
+            args.patterns = resolve_patterns(args.patterns)
+        except ValueError as e:
+            parser.error(str(e))
+    if args.backtest_patterns:
+        try:
+            args.backtest_patterns = resolve_patterns(args.backtest_patterns)
+        except ValueError as e:
+            parser.error(str(e))
 
     if args.watchlist and args.symbol:
         parser.error("--watchlist and a positional symbol are mutually exclusive.")
