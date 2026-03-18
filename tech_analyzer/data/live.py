@@ -96,26 +96,90 @@ def fetch(
     api_client = upstox_client.ApiClient(configuration)
     history_api = upstox_client.HistoryV3Api(api_client)
 
-    response = history_api.get_historical_candle_data1(
+    all_candles = []
+
+    # 1. Historical candles (previous days up to yesterday)
+    hist_to = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    hist_response = history_api.get_historical_candle_data1(
         instrument_key=instrument_key,
         unit=unit,
         interval=iv,
-        to_date=to_date,
+        to_date=hist_to,
         from_date=from_date,
     )
+    if hist_response.data and hist_response.data.candles:
+        all_candles.extend(hist_response.data.candles)
 
-    candles = response.data.candles  # [timestamp, open, high, low, close, volume, oi]
-    if not candles:
+    # 2. Today's intraday candles (live, current session)
+    try:
+        intra_response = history_api.get_intra_day_candle_data(
+            instrument_key=instrument_key,
+            unit=unit,
+            interval=iv,
+        )
+        if intra_response.data and intra_response.data.candles:
+            all_candles.extend(intra_response.data.candles)
+    except Exception:
+        pass  # market may not have opened yet — historical data is sufficient
+
+    if not all_candles:
         raise ValueError(
             f"No data returned for '{symbol}' from Upstox "
             f"({from_date} to {to_date}, interval={interval})."
         )
 
     df = pd.DataFrame(
-        candles,
+        all_candles,
         columns=["datetime", "open", "high", "low", "close", "volume", "oi"],
     )
     df["datetime"] = pd.to_datetime(df["datetime"])
     df = df.set_index("datetime").sort_index()
+    df = df[~df.index.duplicated(keep="last")]  # drop overlaps if any
     df = df[["open", "high", "low", "close", "volume"]].astype(float)
     return df
+
+
+def fetch_ltp(symbols: list[str], access_token: str | None = None) -> dict[str, float]:
+    """
+    Fetch the Last Traded Price (LTP) for a list of symbols in one API call.
+
+    Returns a dict {symbol: ltp}. Symbols that fail are omitted.
+    """
+    from tech_analyzer.data.auth import load_token
+    from tech_analyzer.data.instruments import symbol_to_instrument_key
+
+    if access_token is None:
+        access_token = load_token()
+        if access_token is None:
+            raise RuntimeError("No Upstox access token. Run: python -m tech_analyzer --auth")
+
+    # Build instrument_key → symbol reverse map
+    key_to_symbol: dict[str, str] = {}
+    for sym in symbols:
+        try:
+            key_to_symbol[symbol_to_instrument_key(sym)] = sym
+        except Exception:
+            pass
+
+    if not key_to_symbol:
+        return {}
+
+    instrument_keys = ",".join(key_to_symbol.keys())
+
+    configuration = upstox_client.Configuration()
+    configuration.access_token = access_token
+    api_client = upstox_client.ApiClient(configuration)
+    quote_api = upstox_client.MarketQuoteApi(api_client)
+
+    try:
+        response = quote_api.get_ltp(instrument_keys, "2.0")
+    except Exception:
+        return {}
+
+    result: dict[str, float] = {}
+    if response and response.data:
+        for key, quote in response.data.items():
+            sym = key_to_symbol.get(key)
+            if sym and quote.last_price is not None:
+                result[sym] = float(quote.last_price)
+    return result

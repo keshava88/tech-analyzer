@@ -32,6 +32,13 @@ from tech_analyzer.patterns.detector import detect, detect_latest
 
 
 def main():
+    import logging
+    from tech_analyzer.log import setup as _setup_logging
+
+    # Quick pre-parse to check for --debug before full argument parsing
+    _level = logging.DEBUG if "--debug" in sys.argv else logging.INFO
+    _setup_logging(_level)
+
     parser = argparse.ArgumentParser(
         prog="tech-analyzer",
         description="Candlestick pattern detector for Indian stocks (NSE/BSE)",
@@ -223,6 +230,11 @@ def main():
         "--fresh",
         action="store_true",
         help="Start a fresh paper trading session (ignore saved portfolio state)",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging (shows candle timestamps, fetch details)",
     )
 
     args = parser.parse_args()

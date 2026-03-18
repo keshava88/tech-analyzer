@@ -9,6 +9,7 @@ Usage:
                            target_pct=2.0, stoploss_pct=1.0)
     session.run()
 """
+import logging
 import time
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
@@ -17,6 +18,8 @@ import pandas as pd
 
 from tech_analyzer.trading.portfolio import Portfolio, DEFAULT_PORTFOLIO_FILE
 from tech_analyzer.trading.engine import process_candle
+
+log = logging.getLogger(__name__)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -45,7 +48,7 @@ def _wait_for_candle_close(interval_minutes: int) -> None:
     remainder = minutes % interval_minutes
     wait_m = (interval_minutes - remainder) if remainder > 0 else interval_minutes
     wait_s = wait_m * 60 - seconds + 5   # +5s buffer for data to arrive
-    print(f"  Waiting {wait_s}s for next {interval_minutes}m candle close...", flush=True)
+    log.info("Waiting %ds for next %dm candle close...", wait_s, interval_minutes)
     time.sleep(wait_s)
 
 
@@ -82,23 +85,23 @@ class PaperSession:
         else:
             self.portfolio = Portfolio.load(portfolio_file)
             if self.portfolio.capital != capital and not self.portfolio.closed_trades and not self.portfolio.positions:
-                # Fresh portfolio with custom capital
                 self.portfolio.capital = capital
                 self.portfolio.cash = capital
 
         self.portfolio_file = portfolio_file
-        self._seen_candles: dict[str, str] = {}  # symbol → last processed candle datetime
+        self._seen_candles: dict[str, str] = {}   # symbol → last processed candle datetime
+        self._last_price: dict[str, float] = {}   # symbol → last known close price
 
     # ------------------------------------------------------------------ #
     # Core loop
     # ------------------------------------------------------------------ #
     def run(self) -> None:
-        print(f"\n=== Paper Trading Session ===")
-        print(f"Symbols:   {', '.join(self.symbols)}")
-        print(f"Interval:  {self.interval}  Target: +{self.target_pct}%  Stop: -{self.stoploss_pct}%")
-        print(f"Capital:   INR {self.portfolio.cash:,.0f}")
-        print(f"Started:   {_ist_now().strftime('%Y-%m-%d %H:%M:%S IST')}")
-        print("=" * 44)
+        log.info("=" * 44)
+        log.info("Paper Trading Session")
+        log.info("Symbols  : %s", ", ".join(self.symbols))
+        log.info("Interval : %s  Target: +%s%%  Stop: -%s%%", self.interval, self.target_pct, self.stoploss_pct)
+        log.info("Capital  : INR %s", f"{self.portfolio.cash:,.0f}")
+        log.info("=" * 44)
 
         try:
             while True:
@@ -109,29 +112,30 @@ class PaperSession:
                         wait = (
                             datetime.combine(now.date(), MARKET_OPEN, tzinfo=IST) - now
                         ).seconds
-                        print(f"\nMarket not open yet. Waiting {wait//60}m {wait%60}s until 09:15 IST...")
+                        log.info("Market not open yet. Waiting %dm %ds until 09:15 IST...", wait // 60, wait % 60)
                         time.sleep(min(wait, 60))
                     else:
-                        print("\nMarket closed for the day.")
+                        log.info("Market closed for the day.")
                         break
                     continue
 
                 eod = now.time() >= EOD_CUTOFF
                 self._process_all_symbols(eod=eod)
                 self.portfolio.save(self.portfolio_file)
-                self._print_status()
+                self._log_symbol_table()
+                self._log_status()
 
                 if eod:
-                    print("\nEOD: All positions closed. Session complete.")
+                    log.info("EOD: All positions closed. Session complete.")
                     break
 
                 _wait_for_candle_close(self.iv_minutes)
 
         except KeyboardInterrupt:
-            print("\n\nInterrupted. Saving portfolio state...")
+            log.info("Interrupted. Saving portfolio state...")
             self.portfolio.save(self.portfolio_file)
 
-        self._print_final_report()
+        self._log_final_report()
 
     # ------------------------------------------------------------------ #
     # Per-candle processing
@@ -140,30 +144,33 @@ class PaperSession:
         from tech_analyzer.data.live import fetch as upstox_fetch
         from tech_analyzer.patterns.detector import detect
 
-        timestamp = _ist_now().strftime("%H:%M:%S")
-        print(f"\n[{timestamp}] Processing {len(self.symbols)} symbol(s)  {'[EOD CLOSE]' if eod else ''}")
+        log.info("Processing %d symbol(s)%s", len(self.symbols), "  [EOD CLOSE]" if eod else "")
 
         for symbol in self.symbols:
             try:
                 df = upstox_fetch(symbol, interval=self.interval)
             except Exception as e:
-                print(f"  ! {symbol}: fetch error — {e}")
+                log.error("! %s: fetch error — %s", symbol, e)
                 continue
 
-            # Get the most recent candle
             last_ts = str(df.index[-1])
+            last_close = float(df["close"].iloc[-1])
+            self._last_price[symbol] = last_close
+            log.debug(
+                "%s: latest candle=%s  close=%.2f  candles_fetched=%d",
+                symbol, last_ts, last_close, len(df),
+            )
             if self._seen_candles.get(symbol) == last_ts and not eod:
-                print(f"  . {symbol}: no new candle yet")
+                log.info(". %-22s no new candle  (last=%s)", symbol, last_ts)
                 continue
             self._seen_candles[symbol] = last_ts
+            log.debug("%s: new candle accepted", symbol)
 
-            # Detect patterns on the full history
             try:
                 signals = detect(df, patterns=self.patterns, trend_filter=self.trend_filter)
-                # Filter to latest candle only for entry decisions
                 latest_signals = signals[signals["date"] == df.index[-1]].copy() if not signals.empty else signals
             except Exception as e:
-                print(f"  ! {symbol}: detect error — {e}")
+                log.error("! %s: detect error — %s", symbol, e)
                 latest_signals = pd.DataFrame()
 
             candle = {
@@ -186,66 +193,94 @@ class PaperSession:
             )
 
             for ev in events:
-                self._print_event(ev)
+                self._log_event(ev)
 
             if not events:
                 pos = self.portfolio.position_for(symbol)
                 if pos:
-                    print(f"  ~ {symbol:<22} HOLDING {pos.signal.upper()} @ {pos.entry_price}  "
-                          f"tgt={pos.target_price}  stop={pos.stoploss_price}")
+                    log.info(
+                        "~ %-22s HOLDING %-8s @ %-10s tgt=%-10s stop=%s",
+                        symbol, pos.signal.upper(), pos.entry_price,
+                        pos.target_price, pos.stoploss_price,
+                    )
                 else:
-                    print(f"  . {symbol:<22} close={candle['close']:.2f}  no signal")
+                    log.info(". %-22s close=%.2f  no signal", symbol, candle["close"])
 
     @staticmethod
-    def _print_event(ev: dict) -> None:
+    def _log_event(ev: dict) -> None:
         sym = ev["symbol"]
         if ev["event"] == "open":
-            print(
-                f"  + {sym:<22} OPEN  {ev['signal'].upper():<8} "
-                f"{ev['pattern']:<22} @ {ev['price']:.2f}  "
-                f"x{ev['units']}  tgt={ev['target']}  stop={ev['stop']}"
+            log.info(
+                "+ %-22s OPEN  %-8s %-22s @ %-10.2f x%d  tgt=%s  stop=%s",
+                sym, ev["signal"].upper(), ev["pattern"],
+                ev["price"], ev["units"], ev["target"], ev["stop"],
             )
         else:
             sign = "+" if ev["pnl"] >= 0 else ""
-            print(
-                f"  {'W' if ev['pnl'] >= 0 else 'L'} {sym:<22} CLOSE {ev['signal'].upper():<8} "
-                f"{ev['pattern']:<22} @ {ev['price']:.2f}  "
-                f"reason={ev['reason']:<9} PnL={sign}{ev['pnl']:.2f} ({sign}{ev['pct']:.2f}%)"
+            level = "W" if ev["pnl"] >= 0 else "L"
+            log.info(
+                "%s %-22s CLOSE %-8s %-22s @ %-10.2f reason=%-9s PnL=%s%s (%s%s%%)",
+                level, sym, ev["signal"].upper(), ev["pattern"],
+                ev["price"], ev["reason"],
+                sign, ev["pnl"], sign, ev["pct"],
             )
 
-    def _print_status(self) -> None:
+    def _log_symbol_table(self) -> None:
+        from tech_analyzer.data.live import fetch_ltp
+
+        # Fetch real-time LTP for all symbols; fall back to last candle close on failure
+        try:
+            ltp_map = fetch_ltp(self.symbols)
+        except Exception:
+            ltp_map = {}
+
+        log.info("%-24s %10s  %-12s %10s %10s %10s", "Symbol", "LTP", "State", "Entry", "Target", "Stop")
+        log.info("-" * 82)
+        for symbol in self.symbols:
+            price = ltp_map.get(symbol) or self._last_price.get(symbol)
+            price_str = f"{price:.2f}" if price is not None else "N/A"
+            pos = self.portfolio.position_for(symbol)
+            if pos:
+                state = f"HOLD {pos.signal.upper()}"
+                log.info(
+                    "%-24s %10s  %-12s %10.2f %10.2f %10.2f",
+                    symbol, price_str, state,
+                    pos.entry_price, pos.target_price, pos.stoploss_price,
+                )
+            else:
+                log.info("%-24s %10s  %-12s", symbol, price_str, "watching")
+        log.info("-" * 82)
+
+    def _log_status(self) -> None:
         s = self.portfolio.summary()
-        open_count = len(self.portfolio.positions)
-        print(
-            f"\n  Portfolio | Cash: {s['cash']:>10,.0f}  "
-            f"Open: {open_count}  "
-            f"Trades: {s['trades']}  "
-            f"Wins: {s['wins']}  "
-            f"PnL: {s['total_pnl']:+,.0f}"
+        log.info(
+            "Portfolio | Cash: %10s  Open: %d  Trades: %d  Wins: %d  PnL: %s",
+            f"{s['cash']:,.0f}", len(self.portfolio.positions),
+            s["trades"], s["wins"], f"{s['total_pnl']:+,.0f}",
         )
 
-    def _print_final_report(self) -> None:
+    def _log_final_report(self) -> None:
         s = self.portfolio.summary()
-        print(f"\n{'='*60}")
-        print(f"  PAPER TRADING SESSION SUMMARY")
-        print(f"{'='*60}")
-        print(f"  Starting Capital : INR {s['capital']:>12,.0f}")
-        print(f"  Current Cash     : INR {s['cash']:>12,.0f}")
-        print(f"  Open Positions   : {len(self.portfolio.positions)}")
-        print(f"  Total Trades     : {s['trades']}")
-        print(f"  Wins / Losses    : {s['wins']} / {s['losses']}")
-        print(f"  Hit Rate         : {s['hit_rate']}")
-        print(f"  Total P&L        : INR {s['total_pnl']:>+12,.0f}")
-        print(f"{'='*60}")
+        log.info("=" * 60)
+        log.info("PAPER TRADING SESSION SUMMARY")
+        log.info("=" * 60)
+        log.info("Starting Capital : INR %14s", f"{s['capital']:,.0f}")
+        log.info("Current Cash     : INR %14s", f"{s['cash']:,.0f}")
+        log.info("Open Positions   : %d", len(self.portfolio.positions))
+        log.info("Total Trades     : %d", s["trades"])
+        log.info("Wins / Losses    : %d / %d", s["wins"], s["losses"])
+        log.info("Hit Rate         : %s", s["hit_rate"])
+        log.info("Total P&L        : INR %s", f"{s['total_pnl']:+,.0f}")
+        log.info("=" * 60)
 
         if self.portfolio.closed_trades:
-            print(f"\n  Trade Log:")
-            print(f"  {'Symbol':<22} {'Pattern':<22} {'Dir':<8} {'Entry':>8} {'Exit':>8} {'PnL':>8} {'Reason'}")
-            print(f"  {'-'*90}")
-            for t in self.portfolio.closed_trades[-20:]:  # last 20 trades
+            log.info("Trade Log:")
+            log.info("  %-22s %-22s %-8s %8s %8s %8s %s", "Symbol", "Pattern", "Dir", "Entry", "Exit", "PnL", "Reason")
+            log.info("  %s", "-" * 90)
+            for t in self.portfolio.closed_trades[-20:]:
                 sign = "+" if t.pnl >= 0 else ""
-                print(
-                    f"  {t.symbol:<22} {t.pattern:<22} {t.signal:<8} "
-                    f"{t.entry_price:>8.2f} {t.exit_price:>8.2f} "
-                    f"{sign}{t.pnl:>8.2f} {t.exit_reason}"
+                log.info(
+                    "  %-22s %-22s %-8s %8.2f %8.2f %s%8.2f %s",
+                    t.symbol, t.pattern, t.signal,
+                    t.entry_price, t.exit_price, sign, t.pnl, t.exit_reason,
                 )
