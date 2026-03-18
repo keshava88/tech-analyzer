@@ -243,6 +243,15 @@ class PaperSession:
 
     def _log_event(self, ev: dict) -> None:
         sym = ev["symbol"]
+        if ev["event"] == "skip":
+            log.warning(
+                "$ %-22s SKIP  %-8s %-22s  need=₹%.0f  cash=₹%.0f",
+                sym, ev["signal"].upper(), ev["pattern"], ev["cost"], ev["cash"],
+            )
+            self._emit({"type": "error", "symbol": sym,
+                        "message": f"Insufficient funds for {ev['pattern']} {ev['signal']} @ ₹{ev['price']:.2f} "
+                                   f"— need ₹{ev['cost']:.0f}, cash ₹{ev['cash']:.0f}"})
+            return
         if ev["event"] == "open":
             log.info(
                 "+ %-22s OPEN  %-8s %-22s @ %-10.2f x%d  tgt=%s  stop=%s",

@@ -140,30 +140,52 @@ def process_candle(
 
     # --- Check entries (only if no open position and not EOD) ---
     if pos is None and not eod and row is not None:
-        units = _units_for(portfolio.capital, close, fixed_units)
-        target, stop = _calc_targets(close, new_signal, target_pct, stoploss_pct)
+        units = _units_for(portfolio.cash, close, fixed_units)
+        cost  = close * units if new_signal == "bullish" else 0.0
 
-        position = Position(
-            symbol=symbol,
-            entry_date=date_str,
-            entry_price=close,
-            units=units,
-            signal=new_signal,
-            pattern=row["pattern"],
-            target_price=target,
-            stoploss_price=stop,
-        )
-        opened = portfolio.open_position(position)
-        if opened:
+        if units < 1 or (new_signal == "bullish" and cost > portfolio.cash):
             events.append({
-                "event":   "open",
+                "event":   "skip",
                 "symbol":  symbol,
                 "pattern": row["pattern"],
                 "signal":  new_signal,
                 "price":   close,
-                "units":   units,
-                "target":  target,
-                "stop":    stop,
+                "cash":    portfolio.cash,
+                "cost":    cost,
             })
+        else:
+            target, stop = _calc_targets(close, new_signal, target_pct, stoploss_pct)
+            position = Position(
+                symbol=symbol,
+                entry_date=date_str,
+                entry_price=close,
+                units=units,
+                signal=new_signal,
+                pattern=row["pattern"],
+                target_price=target,
+                stoploss_price=stop,
+            )
+            opened = portfolio.open_position(position)
+            if opened:
+                events.append({
+                    "event":   "open",
+                    "symbol":  symbol,
+                    "pattern": row["pattern"],
+                    "signal":  new_signal,
+                    "price":   close,
+                    "units":   units,
+                    "target":  target,
+                    "stop":    stop,
+                })
+            else:
+                events.append({
+                    "event":   "skip",
+                    "symbol":  symbol,
+                    "pattern": row["pattern"],
+                    "signal":  new_signal,
+                    "price":   close,
+                    "cash":    portfolio.cash,
+                    "cost":    cost,
+                })
 
     return events
