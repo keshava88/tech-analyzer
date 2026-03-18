@@ -39,7 +39,7 @@ export interface ClosedTrade {
 }
 
 export type WsEvent =
-  | { type: 'session_status'; status: SessionStatus; symbols?: string[]; interval?: string; capital?: number }
+  | { type: 'session_status'; status: SessionStatus; symbols?: string[]; interval?: string; capital?: number; market_open?: boolean; market_reason?: string }
   | { type: 'portfolio_update'; summary: PortfolioSummary; positions: Position[]; ts?: string }
   | { type: 'ltp_tick'; prices: Record<string, number>; ts?: string }
   | { type: 'candle_processed'; symbol: string; candle: { time: string; open: number; high: number; low: number; close: number }; ts?: string }

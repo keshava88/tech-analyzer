@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from tech_analyzer.web.state import get_state, SessionStatus
 from tech_analyzer.web.session_runner import start_session, stop_session
+from tech_analyzer.web.market import market_status
 from tech_analyzer.trading.portfolio import Portfolio, DEFAULT_PORTFOLIO_FILE
 
 router = APIRouter(prefix="/session", tags=["session"])
@@ -21,7 +22,8 @@ class StartRequest(BaseModel):
 
 
 @router.post("/start")
-def session_start(req: StartRequest):
+async def session_start(req: StartRequest):
+    import asyncio as _asyncio
     state = get_state()
     if state.status == SessionStatus.RUNNING:
         raise HTTPException(400, "Session already running.")
@@ -33,6 +35,7 @@ def session_start(req: StartRequest):
     if not symbols:
         raise HTTPException(400, "Provide symbols or a watchlist.")
 
+    loop = _asyncio.get_running_loop()
     start_session({
         "symbols": symbols,
         "interval": req.interval,
@@ -42,7 +45,7 @@ def session_start(req: StartRequest):
         "patterns": req.patterns,
         "trend_filter": req.trend_filter,
         "fresh": req.fresh,
-    })
+    }, loop)
     return {"status": "started", "symbols": symbols, "interval": req.interval}
 
 
@@ -63,9 +66,12 @@ def session_reset(capital: float = 100_000.0):
 @router.get("/status")
 def session_status():
     state = get_state()
+    mkt = market_status()
     return {
         "status": state.status,
         "symbols": state.symbols,
         "interval": state.interval,
         "capital": state.capital,
+        "market_open": mkt["open"],
+        "market_reason": mkt["reason"],
     }

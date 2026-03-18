@@ -5,12 +5,14 @@ import type { SessionStatus } from '../ws/eventTypes'
 
 interface Props {
   status: SessionStatus
+  marketOpen: boolean
+  marketReason: string
 }
 
 const WATCHLISTS = ['nifty_bank', 'nifty50']
 const INTERVALS  = ['1m', '5m', '15m', '30m', '1h']
 
-export function SessionControls({ status }: Props) {
+export function SessionControls({ status, marketOpen, marketReason }: Props) {
   const [cfg, setCfg] = useState<StartConfig>({
     watchlist: 'nifty_bank',
     interval: '15m',
@@ -24,6 +26,7 @@ export function SessionControls({ status }: Props) {
   const [error, setError] = useState('')
 
   const isRunning = status === 'running'
+  const canStart  = marketOpen && !isRunning
 
   async function handleStart() {
     setLoading(true); setError('')
@@ -50,6 +53,20 @@ export function SessionControls({ status }: Props) {
 
   return (
     <div style={{ background: '#1e2530', borderRadius: 8, padding: 20, marginBottom: 24 }}>
+      {marketReason && (
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          background: marketOpen ? '#0d2e1f' : '#2a1a0e',
+          border: `1px solid ${marketOpen ? '#26a69a' : '#e65100'}`,
+          borderRadius: 6, padding: '5px 12px', marginBottom: 16, fontSize: 12,
+        }}>
+          <span style={{ fontSize: 8, color: marketOpen ? '#26a69a' : '#ef5350' }}>●</span>
+          <span style={{ color: marketOpen ? '#26a69a' : '#ff9800', fontWeight: 600 }}>
+            NSE {marketOpen ? 'OPEN' : 'CLOSED'}
+          </span>
+          <span style={{ color: '#8892a4' }}>{marketReason}</span>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
 
         <div style={{ minWidth: 140 }}>
@@ -93,7 +110,7 @@ export function SessionControls({ status }: Props) {
 
         <div style={{ display: 'flex', gap: 8 }}>
           {!isRunning
-            ? <button onClick={handleStart} disabled={loading} style={btn('#26a69a')}>▶ Start</button>
+            ? <button onClick={handleStart} disabled={loading || !canStart} title={!marketOpen ? marketReason : undefined} style={btn(canStart ? '#26a69a' : '#3a4a3a')}>▶ Start</button>
             : <button onClick={handleStop}  disabled={loading} style={btn('#ef5350')}>■ Stop</button>
           }
           <button onClick={handleReset} disabled={loading || isRunning} style={btn('#555e6e')}>↺ Reset</button>

@@ -18,6 +18,8 @@ interface AppState {
   feedEvents: FeedEvent[]
   selectedSymbol: string | null
   feedCounter: number
+  marketOpen: boolean
+  marketReason: string
 }
 
 const DEFAULT_SUMMARY: PortfolioSummary = {
@@ -29,6 +31,7 @@ const initialState: AppState = {
   status: 'idle', symbols: [], interval: '15m',
   summary: DEFAULT_SUMMARY, positions: [],
   ltpMap: {}, feedEvents: [], selectedSymbol: null, feedCounter: 0,
+  marketOpen: false, marketReason: '',
 }
 
 type Action =
@@ -48,7 +51,14 @@ function reducer(state: AppState, action: Action): AppState {
   const ev = action.event
   switch (ev.type) {
     case 'session_status':
-      return { ...state, status: ev.status, symbols: ev.symbols ?? state.symbols, interval: ev.interval ?? state.interval }
+      return {
+        ...state,
+        status: ev.status,
+        symbols: ev.symbols ?? state.symbols,
+        interval: ev.interval ?? state.interval,
+        marketOpen: ev.market_open ?? state.marketOpen,
+        marketReason: ev.market_reason ?? state.marketReason,
+      }
 
     case 'portfolio_update':
       return { ...state, summary: ev.summary, positions: ev.positions }
@@ -97,7 +107,7 @@ export default function App() {
           <span style={{ fontSize: 13, color: '#8892a4' }}>Paper Trading Dashboard</span>
         </div>
 
-        <SessionControls status={state.status} />
+        <SessionControls status={state.status} marketOpen={state.marketOpen} marketReason={state.marketReason} />
         <PortfolioSummaryCard summary={state.summary} />
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 16, marginBottom: 24 }}>

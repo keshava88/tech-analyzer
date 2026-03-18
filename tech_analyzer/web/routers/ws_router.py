@@ -6,6 +6,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from tech_analyzer.web.broadcaster import register, unregister
 from tech_analyzer.web.state import get_state
+from tech_analyzer.web.market import market_status
 from tech_analyzer.trading.portfolio import Portfolio, DEFAULT_PORTFOLIO_FILE
 
 router = APIRouter(tags=["ws"])
@@ -18,9 +19,12 @@ async def websocket_endpoint(ws: WebSocket):
 
     # Send current state immediately on connect
     state = get_state()
+    mkt = market_status()
     await ws.send_json({"type": "session_status", "status": state.status,
                         "symbols": state.symbols, "interval": state.interval,
-                        "capital": state.capital})
+                        "capital": state.capital,
+                        "market_open": mkt["open"],
+                        "market_reason": mkt["reason"]})
 
     port = Portfolio.load(DEFAULT_PORTFOLIO_FILE)
     await ws.send_json({"type": "portfolio_update",
