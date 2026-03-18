@@ -11,7 +11,9 @@ Usage:
 """
 import logging
 import time
+from dataclasses import asdict
 from datetime import datetime, time as dtime
+from typing import Callable
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -70,6 +72,7 @@ class PaperSession:
         trend_filter: bool = True,
         portfolio_file=DEFAULT_PORTFOLIO_FILE,
         fresh: bool = False,
+        on_event: Callable[[dict], None] | None = None,
     ):
         self.symbols = symbols
         self.interval = interval
@@ -91,6 +94,19 @@ class PaperSession:
         self.portfolio_file = portfolio_file
         self._seen_candles: dict[str, str] = {}   # symbol → last processed candle datetime
         self._last_price: dict[str, float] = {}   # symbol → last known close price
+        self._on_event = on_event
+        self._stop_requested = False
+
+    # ------------------------------------------------------------------ #
+    # Event emission
+    # ------------------------------------------------------------------ #
+    def _emit(self, event: dict) -> None:
+        if self._on_event is not None:
+            event.setdefault("ts", _ist_now().isoformat())
+            try:
+                self._on_event(event)
+            except Exception:
+                pass  # never let a callback crash the session
 
     # ------------------------------------------------------------------ #
     # Core loop
@@ -103,8 +119,16 @@ class PaperSession:
         log.info("Capital  : INR %s", f"{self.portfolio.cash:,.0f}")
         log.info("=" * 44)
 
+        self._emit({"type": "session_status", "status": "running",
+                    "symbols": self.symbols, "interval": self.interval,
+                    "capital": self.portfolio.capital})
+
         try:
             while True:
+                if self._stop_requested:
+                    log.info("Stop requested.")
+                    break
+
                 now = _ist_now()
 
                 if not _is_market_open(now):
@@ -122,11 +146,15 @@ class PaperSession:
                 eod = now.time() >= EOD_CUTOFF
                 self._process_all_symbols(eod=eod)
                 self.portfolio.save(self.portfolio_file)
+                self._emit({"type": "portfolio_update",
+                            "summary": self.portfolio.summary(),
+                            "positions": [asdict(p) for p in self.portfolio.positions]})
                 self._log_symbol_table()
                 self._log_status()
 
                 if eod:
                     log.info("EOD: All positions closed. Session complete.")
+                    self._emit({"type": "session_status", "status": "eod_complete"})
                     break
 
                 _wait_for_candle_close(self.iv_minutes)
@@ -134,8 +162,10 @@ class PaperSession:
         except KeyboardInterrupt:
             log.info("Interrupted. Saving portfolio state...")
             self.portfolio.save(self.portfolio_file)
+            self._emit({"type": "session_status", "status": "stopped"})
 
         self._log_final_report()
+        self._generate_eod_report()
 
     # ------------------------------------------------------------------ #
     # Per-candle processing
@@ -165,6 +195,11 @@ class PaperSession:
                 continue
             self._seen_candles[symbol] = last_ts
             log.debug("%s: new candle accepted", symbol)
+            self._emit({"type": "candle_processed", "symbol": symbol,
+                        "candle": {"time": last_ts, "open": float(df["open"].iloc[-1]),
+                                   "high": float(df["high"].iloc[-1]),
+                                   "low": float(df["low"].iloc[-1]),
+                                   "close": last_close}})
 
             try:
                 signals = detect(df, patterns=self.patterns, trend_filter=self.trend_filter)
@@ -206,8 +241,7 @@ class PaperSession:
                 else:
                     log.info(". %-22s close=%.2f  no signal", symbol, candle["close"])
 
-    @staticmethod
-    def _log_event(ev: dict) -> None:
+    def _log_event(self, ev: dict) -> None:
         sym = ev["symbol"]
         if ev["event"] == "open":
             log.info(
@@ -215,6 +249,10 @@ class PaperSession:
                 sym, ev["signal"].upper(), ev["pattern"],
                 ev["price"], ev["units"], ev["target"], ev["stop"],
             )
+            self._emit({"type": "trade_open", "symbol": sym,
+                        "signal": ev["signal"], "pattern": ev["pattern"],
+                        "price": ev["price"], "units": ev["units"],
+                        "target": ev["target"], "stop": ev["stop"]})
         else:
             sign = "+" if ev["pnl"] >= 0 else ""
             level = "W" if ev["pnl"] >= 0 else "L"
@@ -224,6 +262,10 @@ class PaperSession:
                 ev["price"], ev["reason"],
                 sign, ev["pnl"], sign, ev["pct"],
             )
+            self._emit({"type": "trade_close", "symbol": sym,
+                        "signal": ev["signal"], "pattern": ev["pattern"],
+                        "price": ev["price"], "units": ev["units"],
+                        "reason": ev["reason"], "pnl": ev["pnl"], "pct": ev["pct"]})
 
     def _log_symbol_table(self) -> None:
         from tech_analyzer.data.live import fetch_ltp
@@ -258,6 +300,10 @@ class PaperSession:
             f"{s['cash']:,.0f}", len(self.portfolio.positions),
             s["trades"], s["wins"], f"{s['total_pnl']:+,.0f}",
         )
+
+    def _generate_eod_report(self) -> None:
+        from tech_analyzer.trading.report import generate_eod_report
+        generate_eod_report(self.portfolio, interval=self.interval)
 
     def _log_final_report(self) -> None:
         s = self.portfolio.summary()
