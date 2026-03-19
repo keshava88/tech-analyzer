@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from tech_analyzer.web.state import get_state, SessionStatus
 from tech_analyzer.web.broadcaster import queue_consumer, broadcast
-from tech_analyzer.web.routers import session_router, portfolio_router, ws_router
+from tech_analyzer.web.routers import session_router, portfolio_router, ws_router, auth_router
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +66,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    app.include_router(auth_router.router)   # /callback and /api/auth/*
     app.include_router(session_router.router, prefix="/api")
     app.include_router(portfolio_router.router, prefix="/api")
     app.include_router(ws_router.router)
