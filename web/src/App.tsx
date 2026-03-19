@@ -38,6 +38,7 @@ const initialState: AppState = {
 type Action =
   | { type: 'ws_event'; event: WsEvent }
   | { type: 'select_symbol'; symbol: string }
+  | { type: 'load_history'; events: FeedEvent[] }
 
 function fmt(ts?: string) {
   if (!ts) return new Date().toTimeString().slice(0, 8)
@@ -47,6 +48,12 @@ function fmt(ts?: string) {
 function reducer(state: AppState, action: Action): AppState {
   if (action.type === 'select_symbol') {
     return { ...state, selectedSymbol: state.selectedSymbol === action.symbol ? null : action.symbol }
+  }
+
+  if (action.type === 'load_history') {
+    // Prepend historical events; don't duplicate if already loaded
+    if (state.feedEvents.length > 0) return state
+    return { ...state, feedEvents: action.events, feedCounter: action.events.length }
   }
 
   const ev = action.event
@@ -82,6 +89,18 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, feedCounter: id, feedEvents: [...state.feedEvents.slice(-99), feed] }
     }
 
+    case 'candle_processed': {
+      // Replace the last heartbeat line if it exists, otherwise append
+      const id = state.feedCounter + 1
+      const msg = `candle processed  close=${ev.candle.close}`
+      const feed: FeedEvent = { id, ts: fmt(ev.ts), type: 'candle', symbol: ev.symbol, message: msg, color: '#3a4a5a' }
+      const prev = state.feedEvents
+      const lastIdx = prev.length - 1
+      const withoutLast = lastIdx >= 0 && prev[lastIdx].type === 'candle' && prev[lastIdx].symbol === ev.symbol
+        ? prev.slice(0, lastIdx) : prev
+      return { ...state, feedCounter: id, feedEvents: [...withoutLast.slice(-98), feed] }
+    }
+
     case 'error': {
       const id = state.feedCounter + 1
       const feed: FeedEvent = { id, ts: fmt(ev.ts), type: 'error', symbol: ev.symbol, message: `ERROR: ${ev.message}`, color: '#ff9800' }
@@ -101,11 +120,30 @@ export default function App() {
 
   // Fetch initial state on mount via REST (no race with WS timing)
   useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10)
     async function init() {
       try {
-        const [status, portfolio] = await Promise.all([api.getStatus(), api.getPortfolio()])
+        const [status, portfolio, tradesResp] = await Promise.all([
+          api.getStatus(), api.getPortfolio(), api.getTrades(today),
+        ])
         dispatch({ type: 'ws_event', event: { type: 'session_status', status: status.status, symbols: status.symbols, interval: status.interval, capital: status.capital, market_open: status.market_open, market_reason: status.market_reason } })
         dispatch({ type: 'ws_event', event: { type: 'portfolio_update', summary: portfolio.summary, positions: portfolio.positions } })
+
+        // Pre-populate feed with today's closed trades
+        const history: FeedEvent[] = (tradesResp.trades ?? []).map((t: Record<string, unknown>, i: number) => {
+          const pnl = t.pnl as number
+          const sign = pnl >= 0 ? '+' : ''
+          const pct = t.pct as number
+          return {
+            id: i + 1,
+            ts: fmt(t.exit_date as string),
+            type: 'close',
+            symbol: t.symbol as string,
+            message: `CLOSE ${(t.signal as string).toUpperCase()} ${t.pattern} @ ₹${t.exit_price}  ${t.exit_reason}  P&L: ${sign}₹${(pnl).toFixed(2)} (${sign}${pct}%)`,
+            color: pnl >= 0 ? '#26a69a' : '#ef5350',
+          }
+        })
+        if (history.length) dispatch({ type: 'load_history', events: history })
       } catch { /* backend not ready */ }
     }
     init()
