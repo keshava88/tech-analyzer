@@ -1,6 +1,7 @@
-import { useReducer, useCallback } from 'react'
-import { useWebSocket } from './ws/useWebSocket'
+import { useReducer, useCallback, useEffect } from 'react'
+import { useWebSocket, useWsConnected } from './ws/useWebSocket'
 import type { WsEvent, SessionStatus, Position, PortfolioSummary } from './ws/eventTypes'
+import { api } from './api/client'
 import { SessionControls } from './components/SessionControls'
 import { PortfolioSummary as PortfolioSummaryCard } from './components/PortfolioSummary'
 import { SymbolTable } from './components/SymbolTable'
@@ -93,10 +94,31 @@ function reducer(state: AppState, action: Action): AppState {
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState)
+  const wsConnected = useWsConnected()
 
   useWebSocket(useCallback((event: WsEvent) => {
     dispatch({ type: 'ws_event', event })
   }, []))
+
+  // Poll REST API every 3s until WebSocket is confirmed open
+  useEffect(() => {
+    if (wsConnected) return
+
+    let cancelled = false
+
+    async function poll() {
+      try {
+        const [status, portfolio] = await Promise.all([api.getStatus(), api.getPortfolio()])
+        if (cancelled) return
+        dispatch({ type: 'ws_event', event: { type: 'session_status', status: status.status, symbols: status.symbols, interval: status.interval, capital: status.capital, market_open: status.market_open, market_reason: status.market_reason } })
+        dispatch({ type: 'ws_event', event: { type: 'portfolio_update', summary: portfolio.summary, positions: portfolio.positions } })
+      } catch { /* backend not ready yet */ }
+    }
+
+    poll()
+    const id = setInterval(poll, 3000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [wsConnected])
 
   return (
     <div style={{ minHeight: '100vh', background: '#111722', color: '#c8d0dc', fontFamily: 'Inter, system-ui, sans-serif', padding: 24 }}>

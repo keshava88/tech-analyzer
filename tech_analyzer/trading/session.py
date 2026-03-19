@@ -10,6 +10,7 @@ Usage:
     session.run()
 """
 import logging
+import threading
 import time
 from dataclasses import asdict
 from datetime import datetime, time as dtime
@@ -39,10 +40,10 @@ def _is_market_open(now: datetime | None = None) -> bool:
     return MARKET_OPEN <= t <= MARKET_CLOSE
 
 
-def _wait_for_candle_close(interval_minutes: int) -> None:
+def _wait_for_candle_close(interval_minutes: int, stop_event: threading.Event) -> None:
     """
     Sleep until the next candle boundary + 5 seconds buffer.
-    e.g. for 15m: next boundary after 9:15 is 9:30, then 9:45, ...
+    Returns early if stop_event is set.
     """
     now = _ist_now()
     minutes = now.minute
@@ -51,7 +52,7 @@ def _wait_for_candle_close(interval_minutes: int) -> None:
     wait_m = (interval_minutes - remainder) if remainder > 0 else interval_minutes
     wait_s = wait_m * 60 - seconds + 5   # +5s buffer for data to arrive
     log.info("Waiting %ds for next %dm candle close...", wait_s, interval_minutes)
-    time.sleep(wait_s)
+    stop_event.wait(timeout=wait_s)
 
 
 def _interval_minutes(interval: str) -> int:
@@ -96,6 +97,7 @@ class PaperSession:
         self._last_price: dict[str, float] = {}   # symbol → last known close price
         self._on_event = on_event
         self._stop_requested = False
+        self._stop_event = threading.Event()
 
     # ------------------------------------------------------------------ #
     # Event emission
@@ -125,7 +127,7 @@ class PaperSession:
 
         try:
             while True:
-                if self._stop_requested:
+                if self._stop_requested or self._stop_event.is_set():
                     log.info("Stop requested.")
                     break
 
@@ -157,7 +159,7 @@ class PaperSession:
                     self._emit({"type": "session_status", "status": "eod_complete"})
                     break
 
-                _wait_for_candle_close(self.iv_minutes)
+                _wait_for_candle_close(self.iv_minutes, self._stop_event)
 
         except KeyboardInterrupt:
             log.info("Interrupted. Saving portfolio state...")

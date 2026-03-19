@@ -18,12 +18,11 @@ def _make_callback(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
     return on_event
 
 
-def start_session(config: dict) -> None:
+def start_session(config: dict, loop: asyncio.AbstractEventLoop) -> None:
     state = get_state()
     if state.status == SessionStatus.RUNNING:
         raise RuntimeError("Session already running.")
 
-    loop = asyncio.get_event_loop()
     callback = _make_callback(loop, state.event_queue)
 
     session = PaperSession(
@@ -68,3 +67,4 @@ def stop_session() -> None:
     state = get_state()
     if state.session is not None:
         state.session._stop_requested = True
+        state.session._stop_event.set()  # interrupt any sleep immediately
