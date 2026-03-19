@@ -22,19 +22,31 @@ class _ISTFormatter(logging.Formatter):
         return dt.strftime(datefmt or "%H:%M:%S")
 
 
-def setup(level: int = logging.INFO) -> None:
-    """Configure the root tech_analyzer logger. Safe to call multiple times."""
-    logger = logging.getLogger("tech_analyzer")
-    if logger.handlers:
-        return  # already configured
+_FMT = "[%(asctime)s] %(levelname)-8s %(message)s"
+_DATEFMT = "%H:%M:%S IST"
 
-    handler = logging.StreamHandler()
-    handler.setFormatter(
-        _ISTFormatter(
-            fmt="[%(asctime)s] %(levelname)-8s %(message)s",
-            datefmt="%H:%M:%S IST",
-        )
-    )
-    logger.setLevel(level)
-    logger.addHandler(handler)
-    logger.propagate = False
+
+def _make_handler() -> logging.StreamHandler:
+    h = logging.StreamHandler()
+    h.setFormatter(_ISTFormatter(fmt=_FMT, datefmt=_DATEFMT))
+    return h
+
+
+def setup(level: int = logging.INFO) -> None:
+    """
+    Configure IST timestamps on all relevant loggers:
+      - tech_analyzer.*  (application logs)
+      - uvicorn, uvicorn.error, uvicorn.access  (server access/error logs)
+
+    Safe to call multiple times.
+    """
+    for name in ("tech_analyzer", "uvicorn", "uvicorn.error", "uvicorn.access"):
+        logger = logging.getLogger(name)
+        if logger.handlers:
+            # Replace existing handlers' formatters rather than adding new ones
+            for h in logger.handlers:
+                h.setFormatter(_ISTFormatter(fmt=_FMT, datefmt=_DATEFMT))
+        else:
+            logger.addHandler(_make_handler())
+        logger.setLevel(level)
+        logger.propagate = False
