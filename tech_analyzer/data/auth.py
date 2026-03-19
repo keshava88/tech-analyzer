@@ -103,7 +103,12 @@ def run_oauth_flow(api_key: str, api_secret: str, redirect_uri: str) -> str:
 
     print(f"Waiting for callback on port {port} ...")
     server = HTTPServer(("127.0.0.1", port), _CallbackHandler)
-    server.handle_request()
+    server.timeout = 120  # give up after 2 minutes
+    while not received_code:
+        server.handle_request()
+        if not received_code and server.timeout is not None:
+            # handle_request timed out
+            break
     server.server_close()
 
     if not received_code:
