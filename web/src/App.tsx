@@ -1,5 +1,5 @@
 import { useReducer, useCallback, useEffect } from 'react'
-import { useWebSocket, useWsConnected } from './ws/useWebSocket'
+import { useWebSocket } from './ws/useWebSocket'
 import type { WsEvent, SessionStatus, Position, PortfolioSummary } from './ws/eventTypes'
 import { api } from './api/client'
 import { SessionControls } from './components/SessionControls'
@@ -94,31 +94,34 @@ function reducer(state: AppState, action: Action): AppState {
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState)
-  const wsConnected = useWsConnected()
 
   useWebSocket(useCallback((event: WsEvent) => {
     dispatch({ type: 'ws_event', event })
   }, []))
 
-  // Poll REST API every 3s until WebSocket is confirmed open
+  // Fetch initial state on mount via REST (no race with WS timing)
   useEffect(() => {
-    if (wsConnected) return
-
-    let cancelled = false
-
-    async function poll() {
+    async function init() {
       try {
         const [status, portfolio] = await Promise.all([api.getStatus(), api.getPortfolio()])
-        if (cancelled) return
         dispatch({ type: 'ws_event', event: { type: 'session_status', status: status.status, symbols: status.symbols, interval: status.interval, capital: status.capital, market_open: status.market_open, market_reason: status.market_reason } })
         dispatch({ type: 'ws_event', event: { type: 'portfolio_update', summary: portfolio.summary, positions: portfolio.positions } })
-      } catch { /* backend not ready yet */ }
+      } catch { /* backend not ready */ }
     }
+    init()
+  }, [])  // run once on mount
 
-    poll()
-    const id = setInterval(poll, 3000)
-    return () => { cancelled = true; clearInterval(id) }
-  }, [wsConnected])
+  // Background sync every 10s in case WS misses an update
+  useEffect(() => {
+    const id = setInterval(async () => {
+      try {
+        const [status, portfolio] = await Promise.all([api.getStatus(), api.getPortfolio()])
+        dispatch({ type: 'ws_event', event: { type: 'session_status', status: status.status, symbols: status.symbols, interval: status.interval, capital: status.capital, market_open: status.market_open, market_reason: status.market_reason } })
+        dispatch({ type: 'ws_event', event: { type: 'portfolio_update', summary: portfolio.summary, positions: portfolio.positions } })
+      } catch { /* ignore */ }
+    }, 10_000)
+    return () => clearInterval(id)
+  }, [])
 
   return (
     <div style={{ minHeight: '100vh', background: '#111722', color: '#c8d0dc', fontFamily: 'Inter, system-ui, sans-serif', padding: 24 }}>

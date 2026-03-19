@@ -32,9 +32,10 @@ async def websocket_endpoint(ws: WebSocket):
                         "positions": [asdict(p) for p in port.positions]})
     try:
         while True:
-            # Keep alive — client can send pings; we just discard them
-            await ws.receive_text()
-    except WebSocketDisconnect:
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+    except Exception:
         pass
     finally:
         await unregister(ws)
